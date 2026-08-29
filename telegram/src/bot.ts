@@ -211,8 +211,32 @@ function domainStateLabel(state: string): string {
 }
 
 function domainDetailView(item: any, page: number) {
+  const lines = [
+    `${stateIcon(item.state)} ${item.domain}`,
+    "",
+    `Query: ${item.count}`,
+    `Decisione DNS: ${item.decision === "block" ? "🚫 BLOCK" : "✅ ALLOW"}`,
+    `Origine: ${domainStateLabel(item.state)}`,
+  ];
+
+  if (item.matchedRule) {
+    lines.push(`Regola: ${item.matchedRule}`);
+  }
+
+  if (item.blocklist?.url) {
+    const listName = shortListName(item.blocklist.url);
+    if (item.state === "list") {
+      lines.push(`Lista: 📚 ${listName}`);
+    } else {
+      lines.push(`Presente anche in: 📚 ${listName}`);
+    }
+    if (item.blocklist.matchedRule) {
+      lines.push(`Match lista: ${item.blocklist.matchedRule}`);
+    }
+  }
+
   return {
-    text: `${stateIcon(item.state)} ${item.domain}\n\nQuery: ${item.count}\nStato: ${domainStateLabel(item.state)}`,
+    text: lines.join("\n"),
     reply_markup: {
       inline_keyboard: [
         [
@@ -544,9 +568,8 @@ bot.on("callback_query", async query => {
         key,
         domain: result.domain,
         count: 0,
-        state: action,
+        ...result,
       };
-      updated.state = action;
 
       const view = domainDetailView(updated, page);
       await bot.editMessageText(view.text, {
