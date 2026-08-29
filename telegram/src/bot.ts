@@ -100,7 +100,7 @@ bot.on("callback_query", async query => {
     return;
   }
 
-  const match = data.match(/^rule:(allow|block):([a-f0-9]{16})$/);
+  const match = data.match(/^rule:(default|allow|block):([a-f0-9]{16})$/);
   if (!match) {
     await bot.answerCallbackQuery(query.id, { text: "Invalid action." });
     return;
@@ -115,11 +115,11 @@ bot.on("callback_query", async query => {
     });
 
     await bot.answerCallbackQuery(query.id, {
-      text: action === "allow" ? "Allowed" : "Blocked",
+      text: action === "allow" ? "Allowed" : action === "block" ? "Blocked" : "Default",
     });
 
     if (query.message) {
-      const icon = action === "allow" ? "✅" : "🚫";
+      const icon = action === "allow" ? "✅" : action === "block" ? "🚫" : "⚪";
       await bot.editMessageText(
         `${icon} ${result.domain}\nState: ${action}`,
         {
@@ -127,6 +127,7 @@ bot.on("callback_query", async query => {
           message_id: query.message.message_id,
           reply_markup: {
             inline_keyboard: [[
+              { text: "⚪ Default", callback_data: `rule:default:${key}` },
               { text: "✅ Allow", callback_data: `rule:allow:${key}` },
               { text: "🚫 Block", callback_data: `rule:block:${key}` },
             ]],
@@ -191,6 +192,7 @@ bot.on("message", async msg => {
           {
             reply_markup: {
               inline_keyboard: [[
+                { text: "⚪ Default", callback_data: `rule:default:${item.key}` },
                 { text: "✅ Allow", callback_data: `rule:allow:${item.key}` },
                 { text: "🚫 Block", callback_data: `rule:block:${item.key}` },
               ]],
