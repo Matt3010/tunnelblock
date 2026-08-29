@@ -22,6 +22,7 @@ let lastFinishedAt: string | null = null;
 let lastSuccess: boolean | null = null;
 let lastOutput = "No update has run yet.";
 let lastSeenRemoteSha: string | null = null;
+let failedRemoteSha: string | null = null;
 
 function authorized(request: any, reply: any): boolean {
   if (!token) {
@@ -130,6 +131,7 @@ fi
 AUTH="$(printf 'x-access-token:%s' "\${GITHUB_TOKEN}" | base64 | tr -d '\n')"
 git -c http.extraHeader="Authorization: Basic $AUTH" -c credential.helper= fetch origin "${branch}"
 
+PREVIOUS_SHA="$(git rev-parse HEAD)"
 git reset --hard "origin/${branch}"
 
 HOST_REPO_DIR="$(docker inspect "$(hostname)" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}')"
@@ -139,6 +141,27 @@ if [ -z "$HOST_REPO_DIR" ] || [ ! -d "$HOST_REPO_DIR" ]; then
 fi
 export HOST_REPO_DIR
 echo "Using host repository path: $HOST_REPO_DIR"
+
+echo "== Pre-flight: repository files =="
+test -f "${repoDir}/docker-compose.yml"
+test -f "${repoDir}/proxy/Caddyfile"
+mkdir -p "${repoDir}/data/rules"
+
+echo "== Pre-flight: docker compose config =="
+if ! docker compose config --quiet; then
+  echo "Compose validation failed; restoring previous checkout."
+  git reset --hard "$PREVIOUS_SHA"
+  exit 10
+fi
+
+echo "== Pre-flight: Caddy configuration and host bind =="
+if ! docker run --rm   -v "$HOST_REPO_DIR/proxy:/candidate-proxy:ro"   caddy:2-alpine   caddy validate --config /candidate-proxy/Caddyfile; then
+  echo "Caddy/bind validation failed; restoring previous checkout."
+  git reset --hard "$PREVIOUS_SHA"
+  exit 11
+fi
+
+echo "== Pre-flight passed =="
 
 docker compose build doh-a doh-b telegram-bot debug-collector
 
@@ -183,13 +206,22 @@ docker compose up -d --no-deps telegram-bot debug-collector
 
     void (async () => {
       if (code === 0) {
+        failedRemoteSha = null;
         try {
           lastSeenRemoteSha = await localSha();
         } catch {}
         await notifyTelegram("✅ AdBlock aggiornato correttamente.");
       } else {
+        try {
+          const { stdout } = await execFileAsync(
+            "git",
+            ["rev-parse", `origin/${branch}`],
+            { cwd: repoDir },
+          );
+          failedRemoteSha = stdout.trim();
+        } catch {}
         await notifyTelegram(
-          `❌ Aggiornamento AdBlock fallito. Usa /update_status per i dettagli. Exit code: ${code}`,
+          `❌ Aggiornamento AdBlock fallito. Il deploy è stato fermato. Usa /update_status per i dettagli. Exit code: ${code}`,
         );
       }
     })();
@@ -204,6 +236,11 @@ async function checkForUpdates(): Promise<void> {
     const local = await localSha();
 
     if (!lastSeenRemoteSha) lastSeenRemoteSha = local;
+
+    if (remote === failedRemoteSha) {
+      app.log.warn({ remote }, "skipping-previously-failed-revision");
+      return;
+    }
 
     if (remote !== local) {
       app.log.info({ local, remote }, "new-master-revision-detected");
@@ -231,6 +268,7 @@ app.get("/status", async (request, reply) => {
     pollIntervalSec,
     currentSha,
     lastSeenRemoteSha,
+    failedRemoteSha,
     lastStartedAt,
     lastFinishedAt,
     lastSuccess,
