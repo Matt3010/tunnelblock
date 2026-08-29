@@ -75,7 +75,7 @@ function domainState(domain: string): "allow" | "block" | "default" {
   return "default";
 }
 
-function domainItems(limit = 12) {
+function domainItems(limit = 8, offset = 0) {
   const counts = new Map<string, number>();
 
   for (const [domain, count] of allowedDomains) {
@@ -85,15 +85,19 @@ function domainItems(limit = 12) {
     counts.set(domain, (counts.get(domain) ?? 0) + count);
   }
 
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([domain, count]) => ({
-      key: domainKey(domain),
-      domain,
-      count,
-      state: domainState(domain),
-    }));
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+
+  return {
+    total: sorted.length,
+    items: sorted
+      .slice(offset, offset + limit)
+      .map(([domain, count]) => ({
+        key: domainKey(domain),
+        domain,
+        count,
+        state: domainState(domain),
+      })),
+  };
 }
 
 function resolveObservedDomain(key: string): string | undefined {
@@ -309,9 +313,12 @@ app.get("/admin/top", async (request, reply) => {
 
 app.get("/admin/domains", async (request, reply) => {
   if (!requireAdmin(request, reply)) return;
-  const requested = Number((request.query as { limit?: string }).limit ?? 12);
-  const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 20) : 12;
-  return { items: domainItems(limit) };
+  const query = request.query as { limit?: string; offset?: string };
+  const requestedLimit = Number(query.limit ?? 8);
+  const requestedOffset = Number(query.offset ?? 0);
+  const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 20) : 8;
+  const offset = Number.isFinite(requestedOffset) ? Math.max(Math.floor(requestedOffset), 0) : 0;
+  return domainItems(limit, offset);
 });
 
 app.post("/admin/reload", async (request, reply) => {
