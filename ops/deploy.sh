@@ -150,7 +150,7 @@ rollback_previous() (
 )
 
 mkdir -p "$(dirname "$STATE_FILE")"
-/update-state.mjs running
+node /update-state.mjs running
 
 set +e
 deploy_target
@@ -159,7 +159,7 @@ set -e
 
 if [ "$DEPLOY_CODE" -eq 0 ]; then
   log "Deployment completed successfully."
-  /update-state.mjs success
+  node /update-state.mjs success
   notify "✅ AdBlock aggiornato correttamente a $TARGET_SHA."
   exit 0
 fi
@@ -179,5 +179,5 @@ else
   notify "❌ Aggiornamento AdBlock fallito e rollback incompleto. Usa /update_status per i dettagli."
 fi
 
-/update-state.mjs failed
+node /update-state.mjs failed
 exit "$DEPLOY_CODE"
