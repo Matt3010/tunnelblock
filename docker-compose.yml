@@ -13,7 +13,7 @@ x-doh-common: &doh-common
     PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
     ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
   volumes:
-    - ./data/rules:/rules
+    - ${HOST_REPO_DIR:-.}/data/rules:/rules
   healthcheck:
     test:
       - CMD
@@ -52,7 +52,7 @@ services:
       doh-b:
         condition: service_healthy
     volumes:
-      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${HOST_REPO_DIR:-.}/proxy/Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
       - "8053:8053"
 
@@ -64,10 +64,6 @@ services:
     environment:
       PORT: 8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-      TELEGRAM_CLEANUP_INTERVAL_HOURS: 12
-      TELEGRAM_DATA_DIR: /telegram-data
-    volumes:
-      - telegram-data:/telegram-data
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GIT_BRANCH: master
       REPO_DIR: /workspace
@@ -76,7 +72,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
     volumes:
-      - ./:/workspace
+      - ${HOST_REPO_DIR:-.}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test:
@@ -105,7 +101,10 @@ services:
       ADMIN_API_BASE: http://doh-proxy:8053
       UPDATER_API_BASE: http://updater:8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-
+      TELEGRAM_CLEANUP_INTERVAL_HOURS: 12
+      TELEGRAM_DATA_DIR: /telegram-data
+    volumes:
+      - telegram-data:/telegram-data
 
 volumes:
   telegram-data:
