@@ -1,0 +1,5 @@
+# Seed block list for MVP testing only.
+doubleclick.net
+googleadservices.com
+googlesyndication.com
+app-measurement.com
