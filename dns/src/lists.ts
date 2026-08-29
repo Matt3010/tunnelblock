@@ -99,6 +99,7 @@ export class BlocklistManager {
   private readonly registryPath: string;
   private readonly cacheDir: string;
   private sourceRules = new Map<string, Set<string>>();
+  private sourceRulesSignature = "";
 
   constructor(
     private readonly rulesDir: string,
@@ -115,7 +116,9 @@ export class BlocklistManager {
       atomicWrite(this.externalBlockPath, "");
     }
 
-    this.reloadSourceRules(this.list());
+    const sources = this.list();
+    this.reloadSourceRules(sources);
+    this.sourceRulesSignature = this.sourcesSignature(sources);
   }
 
   list(): ListSource[] {
@@ -151,6 +154,19 @@ export class BlocklistManager {
     return rules;
   }
 
+  private sourcesSignature(sources: ListSource[]): string {
+    return sources
+      .map(source =>
+        [
+          source.id,
+          source.enabled ? "1" : "0",
+          source.updatedAt ?? "",
+          String(source.domainCount),
+        ].join(":"),
+      )
+      .join("|");
+  }
+
   private reloadSourceRules(sources: ListSource[]) {
     const next = new Map<string, Set<string>>();
     for (const source of sources) {
@@ -158,6 +174,13 @@ export class BlocklistManager {
       next.set(source.id, this.rulesFromCache(source.id));
     }
     this.sourceRules = next;
+  }
+
+  private ensureSourceRulesFresh(sources: ListSource[]) {
+    const signature = this.sourcesSignature(sources);
+    if (signature === this.sourceRulesSignature) return;
+    this.reloadSourceRules(sources);
+    this.sourceRulesSignature = signature;
   }
 
   private async download(url: string): Promise<string[]> {
@@ -205,6 +228,7 @@ export class BlocklistManager {
     }
 
     this.sourceRules = nextSourceRules;
+    this.sourceRulesSignature = this.sourcesSignature(sources);
 
     atomicWrite(
       this.externalBlockPath,
@@ -218,7 +242,10 @@ export class BlocklistManager {
     const domain = normalizeDomain(domainValue);
     if (!domain) return null;
 
-    for (const source of this.list()) {
+    const sources = this.list();
+    this.ensureSourceRulesFresh(sources);
+
+    for (const source of sources) {
       if (!source.enabled) continue;
       const rules = this.sourceRules.get(source.id);
       if (!rules) continue;
