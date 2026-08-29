@@ -642,7 +642,7 @@ bot.on("message", async msg => {
     if (text === "/status") {
       const status = await api("/admin/status");
       await sendTrackedMessage(chatId,
-        `DoH: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nBlocklist: ${status.blocklists ?? 0}\nDomini esterni: ${status.externalBlockedDomains ?? 0}`
+        `DoH: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nBlocklist attive: ${status.blocklists ?? 0}\nDomini esterni: ${status.externalBlockedDomains ?? 0}`
       );
       return;
     }
