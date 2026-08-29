@@ -1,8 +1,25 @@
 # System-agnostic updater
 
-Updates are performed by the `updater` container, not by host-specific scripts.
+The updater container automatically checks GitHub for changes to `master`.
 
-The normal control surface is Telegram:
+Default polling interval:
+
+```text
+300 seconds (5 minutes)
+```
+
+Normal workflow:
+
+```text
+push to master
+  -> updater detects new SHA
+  -> rolling deploy
+  -> Telegram notification
+```
+
+No SSH command and no manual `/update` is required for normal deployments.
+
+Telegram commands remain available as fallbacks:
 
 ```text
 /update
@@ -12,11 +29,13 @@ The normal control surface is Telegram:
 The updater:
 
 1. fetches `master` from GitHub;
-2. resets the local checkout to the remote revision;
-3. rebuilds images while the current resolvers remain online;
-4. replaces `doh-a` and waits for health;
-5. replaces `doh-b` and waits for health;
-6. refreshes the proxy, Telegram bot and debug collector.
+2. compares the remote SHA with the local checkout;
+3. when they differ, starts a rolling update;
+4. rebuilds images while the current resolvers remain online;
+5. replaces `doh-a` and waits for health;
+6. replaces `doh-b` and waits for health;
+7. refreshes the proxy, Telegram bot and debug collector;
+8. notifies Telegram on success/failure.
 
 Mutable rules live under:
 
@@ -24,18 +43,17 @@ Mutable rules live under:
 data/rules/
 ```
 
-and are ignored by Git, so updates do not overwrite Telegram-managed rules.
+and are ignored by Git.
 
-## Private GitHub repository
-
-Because the repository is private, automatic fetching requires a fine-grained GitHub token in `.env`:
+## Configuration
 
 ```env
 GITHUB_TOKEN=github_pat_...
+AUTO_UPDATE_INTERVAL_SEC=300
 ```
 
-Grant only read access to repository Contents.
+For a private repository, `GITHUB_TOKEN` needs only read access to repository Contents.
 
-## Security note
+## Security
 
-The updater mounts `/var/run/docker.sock`. Access to the Docker socket is effectively host-administrator access. The updater API is not published to the host or Cloudflare and is protected by `ADMIN_API_TOKEN`; only the authenticated Telegram bot talks to it over the internal Docker network.
+The updater mounts `/var/run/docker.sock`, which effectively grants host-administrator capability. Its API is not published externally and is protected by `ADMIN_API_TOKEN`.
