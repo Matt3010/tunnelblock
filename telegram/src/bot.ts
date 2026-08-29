@@ -22,24 +22,35 @@ function isAllowed(userId?: number): boolean {
 }
 
 async function requestJson(base: string, path: string, init?: RequestInit) {
-  const res = await fetch(`${base}${path}`, {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${adminToken}`,
-      ...(init?.headers ?? {}),
-    },
-  });
+  let lastError: unknown;
 
-  const text = await res.text();
-  let body: unknown = text;
-  try { body = JSON.parse(text); } catch {}
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const res = await fetch(`${base}${path}`, {
+        ...init,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${adminToken}`,
+          ...(init?.headers ?? {}),
+        },
+      });
 
-  if (!res.ok) {
-    throw new Error(`Admin API ${res.status}: ${text}`);
+      const text = await res.text();
+      let body: unknown = text;
+      try { body = JSON.parse(text); } catch {}
+
+      if (!res.ok) {
+        throw new Error(`Admin API ${res.status}: ${text}`);
+      }
+
+      return body as any;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) await new Promise(resolve => setTimeout(resolve, 750 * attempt));
+    }
   }
 
-  return body as any;
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 async function api(path: string, init?: RequestInit) {
