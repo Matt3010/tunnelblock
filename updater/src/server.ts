@@ -190,19 +190,56 @@ echo "== Pre-flight passed =="
 
 docker compose build updater doh-a doh-b telegram-bot debug-collector
 
+rollback_failed_resolver() {
+  SERVICE="$1"
+  EXIT_CODE="$2"
+
+  echo "ERROR: $SERVICE failed to become ready."
+  echo "== $SERVICE container status =="
+  docker compose ps "$SERVICE" || true
+  echo "== $SERVICE recent logs =="
+  docker compose logs --no-color --tail=120 "$SERVICE" || true
+
+  echo "== Attempting rollback of $SERVICE to previous revision $PREVIOUS_SHA =="
+  git reset --hard "$PREVIOUS_SHA"
+
+  if docker compose build "$SERVICE" && docker compose up -d --no-deps "$SERVICE"; then
+    for j in $(seq 1 30); do
+      if docker compose exec -T "$SERVICE" node -e "fetch('http://127.0.0.1:8053/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+        echo "Rollback recovered $SERVICE."
+        break
+      fi
+      sleep 1
+    done
+  else
+    echo "WARNING: automatic rollback of $SERVICE also failed."
+  fi
+
+  echo "Deployment remains FAILED even if rollback recovered the resolver."
+  exit "$EXIT_CODE"
+}
+
 docker compose up -d doh-a
+DOH_A_READY=0
 for i in $(seq 1 30); do
-  docker compose exec -T doh-a node -e "fetch('http://127.0.0.1:8053/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" && break
-  [ "$i" -eq 30 ] && exit 1
+  if docker compose exec -T doh-a node -e "fetch('http://127.0.0.1:8053/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+    DOH_A_READY=1
+    break
+  fi
   sleep 1
 done
+[ "$DOH_A_READY" -eq 1 ] || rollback_failed_resolver doh-a 21
 
 docker compose up -d doh-b
+DOH_B_READY=0
 for i in $(seq 1 30); do
-  docker compose exec -T doh-b node -e "fetch('http://127.0.0.1:8053/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" && break
-  [ "$i" -eq 30 ] && exit 1
+  if docker compose exec -T doh-b node -e "fetch('http://127.0.0.1:8053/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+    DOH_B_READY=1
+    break
+  fi
   sleep 1
 done
+[ "$DOH_B_READY" -eq 1 ] || rollback_failed_resolver doh-b 22
 
 docker compose up -d --no-deps --force-recreate doh-proxy
 docker compose up -d --no-deps telegram-bot debug-collector
