@@ -315,7 +315,7 @@ if ! docker compose config --quiet; then
 fi
 
 echo "== Pre-flight: build all deployment images =="
-if ! docker compose build doh-proxy updater doh-a doh-b telegram-bot debug-collector; then
+if ! docker compose build doh-proxy updater doh-a doh-b telegram-bot debug-api; then
   echo "Image build failed; restoring previous checkout."
   git reset --hard "$PREVIOUS_SHA"
   exit 11
@@ -416,16 +416,10 @@ docker compose up -d --no-deps doh-b
 wait_ready doh-b || rollback_resolvers doh-b 22
 
 docker compose up -d --no-deps --force-recreate doh-proxy
-docker compose up -d --no-deps --force-recreate telegram-bot debug-collector
+docker compose up -d --no-deps --force-recreate telegram-bot debug-api
 
-echo "== Scheduling updater self-replacement =="
-docker run --rm -d \
-  -e HOST_REPO_DIR="$HOST_REPO_DIR" \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$HOST_REPO_DIR:/workspace" \
-  -w /workspace \
-  adblock-general-purpose-updater:latest \
-  sh -lc 'set -eu; sleep 5; docker compose up -d --no-deps --force-recreate updater; for i in $(seq 1 30); do CID=$(docker compose ps -q updater); [ -n "$CID" ] && S=$(docker inspect --format "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" "$CID" 2>/dev/null || true) && [ "$S" = "healthy" ] && exit 0; sleep 1; done; exit 1' >/dev/null
+echo "== Scheduling updater replacement watchdog =="
+docker compose up -d --no-deps --force-recreate updater-replacer
 `;
 
   const child = spawn("/bin/sh", ["-c", script], {
