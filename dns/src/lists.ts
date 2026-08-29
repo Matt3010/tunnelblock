@@ -12,6 +12,11 @@ export type ListSource = {
   lastError: string | null;
 };
 
+export type BlocklistMatch = {
+  source: ListSource;
+  matchedRule: string;
+};
+
 const MAX_LIST_BYTES = 25 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 20_000;
 
@@ -33,6 +38,17 @@ function normalizeDomain(value: string): string | null {
   }
 
   return domain;
+}
+
+function findSuffixMatch(host: string, rules: Set<string>): string | null {
+  let current = host;
+
+  while (true) {
+    if (rules.has(current)) return current;
+    const dot = current.indexOf(".");
+    if (dot === -1) return null;
+    current = current.slice(dot + 1);
+  }
 }
 
 export function parseBlocklist(text: string): string[] {
@@ -82,6 +98,7 @@ function validateUrl(value: string): string {
 export class BlocklistManager {
   private readonly registryPath: string;
   private readonly cacheDir: string;
+  private sourceRules = new Map<string, Set<string>>();
 
   constructor(
     private readonly rulesDir: string,
@@ -97,6 +114,8 @@ export class BlocklistManager {
     if (!fs.existsSync(this.externalBlockPath)) {
       atomicWrite(this.externalBlockPath, "");
     }
+
+    this.reloadSourceRules(this.list());
   }
 
   list(): ListSource[] {
@@ -108,12 +127,37 @@ export class BlocklistManager {
     }
   }
 
+  activeCount(): number {
+    return this.list().filter(source => source.enabled).length;
+  }
+
   private save(sources: ListSource[]) {
     atomicWrite(this.registryPath, JSON.stringify(sources, null, 2) + "\n");
   }
 
   private cachePath(id: string): string {
     return path.join(this.cacheDir, `${id}.txt`);
+  }
+
+  private rulesFromCache(id: string): Set<string> {
+    const file = this.cachePath(id);
+    if (!fs.existsSync(file)) return new Set();
+
+    const rules = new Set<string>();
+    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+      const domain = normalizeDomain(line);
+      if (domain) rules.add(domain);
+    }
+    return rules;
+  }
+
+  private reloadSourceRules(sources: ListSource[]) {
+    const next = new Map<string, Set<string>>();
+    for (const source of sources) {
+      if (!source.enabled) continue;
+      next.set(source.id, this.rulesFromCache(source.id));
+    }
+    this.sourceRules = next;
   }
 
   private async download(url: string): Promise<string[]> {
@@ -150,18 +194,17 @@ export class BlocklistManager {
 
   private rebuildCombined(sources = this.list()) {
     const combined = new Set<string>();
+    const nextSourceRules = new Map<string, Set<string>>();
 
     for (const source of sources) {
       if (!source.enabled) continue;
 
-      const file = this.cachePath(source.id);
-      if (!fs.existsSync(file)) continue;
-
-      for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-        const domain = normalizeDomain(line);
-        if (domain) combined.add(domain);
-      }
+      const sourceSet = this.rulesFromCache(source.id);
+      nextSourceRules.set(source.id, sourceSet);
+      for (const domain of sourceSet) combined.add(domain);
     }
+
+    this.sourceRules = nextSourceRules;
 
     atomicWrite(
       this.externalBlockPath,
@@ -169,6 +212,22 @@ export class BlocklistManager {
     );
 
     return combined.size;
+  }
+
+  findMatch(domainValue: string): BlocklistMatch | null {
+    const domain = normalizeDomain(domainValue);
+    if (!domain) return null;
+
+    for (const source of this.list()) {
+      if (!source.enabled) continue;
+      const rules = this.sourceRules.get(source.id);
+      if (!rules) continue;
+
+      const matchedRule = findSuffixMatch(domain, rules);
+      if (matchedRule) return { source, matchedRule };
+    }
+
+    return null;
   }
 
   async add(urlValue: string): Promise<ListSource> {
