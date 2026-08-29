@@ -28,27 +28,6 @@ x-doh-common: &doh-common
     start_period: 5s
 
 services:
-  debug-collector:
-    build:
-      context: ./server
-    restart: unless-stopped
-    environment:
-      HOST: 0.0.0.0
-      PORT: 8787
-      DEBUG_TOKEN: ${DEBUG_TOKEN:-change-me}
-    ports:
-      - "8787:8787"
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-      interval: 5s
-      timeout: 2s
-      retries: 5
-      start_period: 3s
-
   doh-a:
     <<: *doh-common
 
@@ -115,7 +94,7 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
-      ADMIN_API_BASE: http://doh-proxy:8053
+      ADMIN_API_BASE: http://doh-a:8053
       UPDATER_API_BASE: http://updater:8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
       TELEGRAM_CLEANUP_INTERVAL_HOURS: 12
