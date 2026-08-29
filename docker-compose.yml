@@ -21,5 +21,21 @@ services:
       UPSTREAM_DNS_HOST: 1.1.1.1
       UPSTREAM_DNS_PORT: 53
       PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    volumes:
+      - ./rules:/rules
     ports:
       - "8053:8053"
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: telegram/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - doh
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
+      ADMIN_API_BASE: http://doh:8053
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
