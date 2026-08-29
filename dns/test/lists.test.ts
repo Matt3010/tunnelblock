@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { parseBlocklist } from "../src/lists.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { BlocklistManager, parseBlocklist } from "../src/lists.js";
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe("parseBlocklist", () => {
   it("parses plain domains, hosts files and Adblock rules", () => {
@@ -28,5 +39,68 @@ describe("parseBlocklist", () => {
     expect(parseBlocklist("ads.example.com\n0.0.0.0 ads.example.com\n")).toEqual([
       "ads.example.com",
     ]);
+  });
+});
+
+describe("BlocklistManager attribution", () => {
+  it("identifies the source list and exact parent rule", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adblock-lists-"));
+    tempDirs.push(dir);
+
+    fs.mkdirSync(path.join(dir, "lists"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "sources.json"), JSON.stringify([
+      {
+        id: "abc123def456",
+        url: "https://example.com/list.txt",
+        enabled: true,
+        addedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        domainCount: 1,
+        lastError: null,
+      },
+    ]));
+    fs.writeFileSync(path.join(dir, "lists", "abc123def456.txt"), "example.com\n");
+    fs.writeFileSync(path.join(dir, "external-block.txt"), "example.com\n");
+
+    const manager = new BlocklistManager(
+      dir,
+      path.join(dir, "external-block.txt"),
+    );
+
+    expect(manager.findMatch("ads.deep.example.com")).toEqual({
+      source: expect.objectContaining({
+        id: "abc123def456",
+        url: "https://example.com/list.txt",
+      }),
+      matchedRule: "example.com",
+    });
+  });
+
+  it("ignores disabled lists when attributing a match", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adblock-lists-"));
+    tempDirs.push(dir);
+
+    fs.mkdirSync(path.join(dir, "lists"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "sources.json"), JSON.stringify([
+      {
+        id: "abc123def456",
+        url: "https://example.com/list.txt",
+        enabled: false,
+        addedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        domainCount: 1,
+        lastError: null,
+      },
+    ]));
+    fs.writeFileSync(path.join(dir, "lists", "abc123def456.txt"), "example.com\n");
+    fs.writeFileSync(path.join(dir, "external-block.txt"), "");
+
+    const manager = new BlocklistManager(
+      dir,
+      path.join(dir, "external-block.txt"),
+    );
+
+    expect(manager.findMatch("ads.example.com")).toBeNull();
+    expect(manager.activeCount()).toBe(0);
   });
 });
