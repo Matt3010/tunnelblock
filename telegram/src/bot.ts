@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import TelegramBot from "node-telegram-bot-api";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -11,10 +13,82 @@ const allowed = new Set(
     .filter(Boolean),
 );
 
+const cleanupIntervalMs = Number(process.env.TELEGRAM_CLEANUP_INTERVAL_HOURS ?? 12) * 60 * 60 * 1000;
+const cleanupDataDir = process.env.TELEGRAM_DATA_DIR ?? "/telegram-data";
+const cleanupFile = path.join(cleanupDataDir, "messages.json");
+
+type TrackedMessage = {
+  chatId: number;
+  messageId: number;
+  createdAt: number;
+};
+
+fs.mkdirSync(cleanupDataDir, { recursive: true });
+
+function loadTrackedMessages(): TrackedMessage[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cleanupFile, "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+let trackedMessages: TrackedMessage[] = loadTrackedMessages();
+
+function persistTrackedMessages() {
+  const tmp = `${cleanupFile}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(trackedMessages));
+  fs.renameSync(tmp, cleanupFile);
+}
+
+function trackMessage(chatId: number, messageId: number, createdAt = Date.now()) {
+  if (trackedMessages.some(item => item.chatId === chatId && item.messageId === messageId)) return;
+  trackedMessages.push({ chatId, messageId, createdAt });
+  persistTrackedMessages();
+}
+
 if (!token) throw new Error("TELEGRAM_BOT_TOKEN is required");
 if (!adminToken) throw new Error("ADMIN_API_TOKEN is required");
 
 const bot = new TelegramBot(token, { polling: true });
+
+async function sendTrackedMessage(
+  chatId: number,
+  text: string,
+  options?: TelegramBot.SendMessageOptions,
+) {
+  const sent = await sendTrackedMessage(chatId, text, options);
+  trackMessage(sent.chat.id, sent.message_id, (sent.date ?? Math.floor(Date.now() / 1000)) * 1000);
+  return sent;
+}
+
+async function cleanupTrackedMessages() {
+  if (trackedMessages.length === 0) return;
+
+  const snapshot = [...trackedMessages];
+  const remaining: TrackedMessage[] = [];
+
+  for (const item of snapshot) {
+    try {
+      await bot.deleteMessage(item.chatId, item.messageId);
+    } catch (error: any) {
+      const ageMs = Date.now() - item.createdAt;
+      const description = String(error?.response?.body?.description ?? error?.message ?? error);
+
+      // Telegram cannot delete messages older than 48 hours. Do not retry those forever.
+      if (ageMs < 48 * 60 * 60 * 1000 && !/message to delete not found/i.test(description)) {
+        remaining.push(item);
+      }
+    }
+
+    // Avoid hammering the Telegram API when /domains has produced many messages.
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+
+  trackedMessages = remaining;
+  persistTrackedMessages();
+}
 
 await bot.setMyCommands([
   { command: "status", description: "Stato del resolver DoH" },
@@ -148,20 +222,22 @@ bot.on("message", async msg => {
   const userId = msg.from?.id;
   const text = (msg.text ?? "").trim();
 
+  trackMessage(chatId, msg.message_id, (msg.date ?? Math.floor(Date.now() / 1000)) * 1000);
+
   if (!isAllowed(userId)) {
-    await bot.sendMessage(chatId, "Unauthorized.");
+    await sendTrackedMessage(chatId, "Unauthorized.");
     return;
   }
 
   try {
     if (text === "/start" || text === "/help") {
-      await bot.sendMessage(chatId, helpText());
+      await sendTrackedMessage(chatId, helpText());
       return;
     }
 
     if (text === "/status") {
       const status = await api("/admin/status");
-      await bot.sendMessage(chatId,
+      await sendTrackedMessage(chatId,
         `DoH: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%`
       );
       return;
@@ -169,7 +245,7 @@ bot.on("message", async msg => {
 
     if (text === "/stats") {
       const s = await api("/admin/stats");
-      await bot.sendMessage(chatId,
+      await sendTrackedMessage(chatId,
         `Queries: ${s.queries}\nAllowed: ${s.allowed}\nBlocked: ${s.blocked}\nBlock rate: ${s.blockRate}%`
       );
       return;
@@ -180,13 +256,13 @@ bot.on("message", async msg => {
       const items = s.items ?? [];
 
       if (!items.length) {
-        await bot.sendMessage(chatId, "No domains observed yet.");
+        await sendTrackedMessage(chatId, "No domains observed yet.");
         return;
       }
 
       for (const item of items) {
         const icon = item.state === "allow" ? "✅" : item.state === "block" ? "🚫" : "⚪";
-        await bot.sendMessage(
+        await sendTrackedMessage(
           chatId,
           `${icon} ${item.domain}\nQueries: ${item.count}\nState: ${item.state}`,
           {
@@ -206,31 +282,31 @@ bot.on("message", async msg => {
     if (text === "/topblocked") {
       const s = await api("/admin/top?decision=block");
       const lines = (s.items ?? []).map((x: any, i: number) => `${i+1}. ${x.domain} — ${x.count}`);
-      await bot.sendMessage(chatId, lines.length ? lines.join("\n") : "No blocked domains yet.");
+      await sendTrackedMessage(chatId, lines.length ? lines.join("\n") : "No blocked domains yet.");
       return;
     }
 
     if (text === "/topallowed") {
       const s = await api("/admin/top?decision=allow");
       const lines = (s.items ?? []).map((x: any, i: number) => `${i+1}. ${x.domain} — ${x.count}`);
-      await bot.sendMessage(chatId, lines.length ? lines.join("\n") : "No allowed domains yet.");
+      await sendTrackedMessage(chatId, lines.length ? lines.join("\n") : "No allowed domains yet.");
       return;
     }
 
     if (text === "/reload") {
       await api("/admin/reload", { method: "POST", body: "{}" });
-      await bot.sendMessage(chatId, "Rules reloaded.");
+      await sendTrackedMessage(chatId, "Rules reloaded.");
       return;
     }
 
     if (text === "/profile") {
-      await bot.sendMessage(chatId, "https://adblock.scanferlamatteo.work/install");
+      await sendTrackedMessage(chatId, "https://adblock.scanferlamatteo.work/install");
       return;
     }
 
     if (text === "/update") {
       await updaterApi("/update", { method: "POST", body: "{}" });
-      await bot.sendMessage(chatId, "Update started. Use /update_status to follow progress.");
+      await sendTrackedMessage(chatId, "Update started. Use /update_status to follow progress.");
       return;
     }
 
@@ -238,14 +314,19 @@ bot.on("message", async msg => {
       const s = await updaterApi("/status");
       const state = s.running ? "running" : (s.lastSuccess === true ? "success" : (s.lastSuccess === false ? "failed" : "idle"));
       const output = typeof s.lastOutput === "string" ? s.lastOutput.slice(-2500) : "";
-      await bot.sendMessage(chatId,
+      await sendTrackedMessage(chatId,
         `Update: ${state}\nStarted: ${s.lastStartedAt ?? "-"}\nFinished: ${s.lastFinishedAt ?? "-"}${output ? "\n\n" + output : ""}`
       );
       return;
     }
 
-    await bot.sendMessage(chatId, helpText());
+    await sendTrackedMessage(chatId, helpText());
   } catch (error) {
-    await bot.sendMessage(chatId, `Error: ${error instanceof Error ? error.message : String(error)}`);
+    await sendTrackedMessage(chatId, `Error: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
+
+
+setInterval(() => {
+  void cleanupTrackedMessages();
+}, cleanupIntervalMs);
