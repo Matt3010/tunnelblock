@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 echo "[1/7] Pulling latest code"
 git pull --ff-only
 
-echo "[2/7] Building redundant DoH replicas and proxy"
-docker compose build doh-a doh-b
+echo "[2/7] Building redundant DoH replicas and control services"
+docker compose build doh-a doh-b telegram-bot updater debug-collector
 
 echo "[3/7] Starting new DoH replicas without touching port 8053"
 docker compose up -d --no-deps doh-a doh-b
