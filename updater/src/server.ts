@@ -104,6 +104,31 @@ async function localSha(): Promise<string> {
   return stdout.trim();
 }
 
+async function ensureRuntimeDependencies(): Promise<void> {
+  const script = `
+set -eu
+cd "${repoDir}"
+
+HOST_REPO_DIR="$(docker inspect "$(hostname)" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}')"
+if [ -z "$HOST_REPO_DIR" ] || [ ! -d "$HOST_REPO_DIR" ]; then
+  echo "Unable to resolve host repository path for /workspace"
+  exit 3
+fi
+export HOST_REPO_DIR
+
+docker compose up -d redis
+`;
+
+  try {
+    await execFileAsync("/bin/sh", ["-c", script], {
+      cwd: repoDir,
+      env: process.env,
+    });
+  } catch (error) {
+    app.log.error({ error }, "runtime-dependency-bootstrap-failed");
+  }
+}
+
 function runUpdate(trigger: "manual" | "automatic" = "manual") {
   running = true;
   lastStartedAt = new Date().toISOString();
@@ -162,6 +187,14 @@ if ! docker compose build doh-proxy; then
 fi
 
 echo "== Pre-flight passed =="
+
+echo "== Ensuring persistent Redis statistics service =="
+docker compose up -d redis
+for i in $(seq 1 30); do
+  docker compose exec -T redis redis-cli ping | grep -q PONG && break
+  [ "$i" -eq 30 ] && exit 12
+  sleep 1
+done
 
 docker compose build updater doh-a doh-b telegram-bot debug-collector
 
@@ -292,5 +325,6 @@ await app.listen({
   port: Number(process.env.PORT ?? 8090),
 });
 
+setTimeout(() => void ensureRuntimeDependencies(), 2_000);
 setTimeout(() => void checkForUpdates(), 10_000);
 setInterval(() => void checkForUpdates(), pollIntervalSec * 1000);
