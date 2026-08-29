@@ -13,7 +13,7 @@ x-doh-common: &doh-common
     PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
     ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
   volumes:
-    - ${HOST_REPO_DIR:-.}/data/rules:/rules
+    - rules-data:/rules
   healthcheck:
     test:
       - CMD
@@ -44,15 +44,15 @@ services:
     <<: *doh-common
 
   doh-proxy:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
     restart: unless-stopped
     depends_on:
       doh-a:
         condition: service_healthy
       doh-b:
         condition: service_healthy
-    volumes:
-      - ${HOST_REPO_DIR:-.}/proxy/Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
       - "8053:8053"
 
@@ -107,4 +107,7 @@ services:
       - telegram-data:/telegram-data
 
 volumes:
+  rules-data:
+    name: adblock-general-purpose-rules-data
   telegram-data:
+    name: adblock-general-purpose-telegram-data
