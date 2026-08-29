@@ -12,6 +12,7 @@ x-doh-common: &doh-common
     UPSTREAM_DNS_PORT: 53
     PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
     ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    REDIS_URL: redis://redis:6379
   volumes:
     - ${HOST_REPO_DIR:-.}/data/rules:/rules
   healthcheck:
@@ -26,6 +27,27 @@ x-doh-common: &doh-common
     start_period: 5s
 
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 2s
+      retries: 5
+      start_period: 3s
+
   debug-collector:
     build:
       context: ./server
@@ -107,5 +129,7 @@ services:
       - telegram-data:/telegram-data
 
 volumes:
+  redis-data:
+    name: adblock-general-purpose-redis-data
   telegram-data:
     name: adblock-general-purpose-telegram-data
