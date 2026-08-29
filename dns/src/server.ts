@@ -106,6 +106,20 @@ function reloadRules() {
   rules = RuleEngine.fromFiles(blockPath, allowPath);
 }
 
+let reloadTimer: NodeJS.Timeout | undefined;
+fs.watch(path.dirname(blockPath), (_eventType, filename) => {
+  if (filename !== "block.txt" && filename !== "allow.txt") return;
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    try {
+      reloadRules();
+      app.log.info({ filename }, "rules-auto-reloaded");
+    } catch (error) {
+      app.log.error({ error, filename }, "rules-auto-reload-failed");
+    }
+  }, 150);
+});
+
 function buildMobileconfig(): string {
   const dnsUuid = crypto.randomUUID().toUpperCase();
   const profileUuid = crypto.randomUUID().toUpperCase();
