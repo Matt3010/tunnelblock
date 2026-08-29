@@ -76,6 +76,88 @@ describe("BlocklistManager attribution", () => {
     });
   });
 
+  it("reports every matching list and overlap diagnostics", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adblock-lists-"));
+    tempDirs.push(dir);
+
+    fs.mkdirSync(path.join(dir, "lists"), { recursive: true });
+    const sources = [
+      {
+        id: "aaaaaaaaaaaa",
+        url: "https://a.example/list.txt",
+        enabled: true,
+        addedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        domainCount: 2,
+        lastError: null,
+      },
+      {
+        id: "bbbbbbbbbbbb",
+        url: "https://b.example/list.txt",
+        enabled: true,
+        addedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        domainCount: 2,
+        lastError: "previous refresh failed",
+      },
+    ];
+
+    fs.writeFileSync(path.join(dir, "sources.json"), JSON.stringify(sources));
+    fs.writeFileSync(
+      path.join(dir, "lists", "aaaaaaaaaaaa.txt"),
+      "shared.example.com\nonly-a.example.com\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "lists", "bbbbbbbbbbbb.txt"),
+      "shared.example.com\nonly-b.example.com\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "external-block.txt"),
+      "only-a.example.com\nonly-b.example.com\nshared.example.com\n",
+    );
+
+    const manager = new BlocklistManager(
+      dir,
+      path.join(dir, "external-block.txt"),
+    );
+
+    expect(manager.findMatches("ads.shared.example.com")).toEqual([
+      {
+        source: expect.objectContaining({ id: "aaaaaaaaaaaa" }),
+        matchedRule: "shared.example.com",
+      },
+      {
+        source: expect.objectContaining({ id: "bbbbbbbbbbbb" }),
+        matchedRule: "shared.example.com",
+      },
+    ]);
+
+    expect(manager.diagnostics()).toEqual({
+      items: [
+        expect.objectContaining({
+          id: "aaaaaaaaaaaa",
+          cachedDomainCount: 2,
+          uniqueDomainCount: 1,
+          overlapDomainCount: 1,
+          healthy: true,
+        }),
+        expect.objectContaining({
+          id: "bbbbbbbbbbbb",
+          cachedDomainCount: 2,
+          uniqueDomainCount: 1,
+          overlapDomainCount: 1,
+          healthy: false,
+        }),
+      ],
+      configuredCount: 2,
+      activeCount: 2,
+      combinedDomainCount: 3,
+      totalActiveEntries: 4,
+      duplicateEntries: 1,
+      unhealthyCount: 1,
+    });
+  });
+
   it("reloads source attribution when another resolver refreshes the registry", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adblock-lists-"));
     tempDirs.push(dir);
