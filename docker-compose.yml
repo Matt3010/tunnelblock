@@ -11,21 +11,14 @@ services:
       - "8787:8787"
 
   doh:
-    image: node:24-alpine
+    build:
+      context: .
+      dockerfile: dns/Dockerfile
     restart: unless-stopped
-    working_dir: /workspace/dns
-    command:
-      - /bin/sh
-      - -lc
-      - |
-        npm install &&
-        npm start
     environment:
       HOST: 0.0.0.0
       PORT: 8053
       UPSTREAM_DNS_HOST: 1.1.1.1
       UPSTREAM_DNS_PORT: 53
-    volumes:
-      - ./:/workspace:ro
     ports:
       - "8053:8053"
