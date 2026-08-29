@@ -52,6 +52,8 @@ services:
     build:
       context: .
       dockerfile: updater/Dockerfile
+      args:
+        UPDATER_BUILD_SHA: ${DEPLOY_SHA:-dev}
     restart: unless-stopped
     environment:
       PORT: 8090
@@ -63,6 +65,8 @@ services:
       AUTO_UPDATE_INTERVAL_SEC: 300
       LIST_REFRESH_INTERVAL_HOURS: 24
       UPDATER_STATE_FILE: /updater-data/state.json
+      UPDATER_LOG_FILE: /updater-data/deploy.log
+      UPDATER_DATA_VOLUME: adblock-general-purpose-updater-data
       UPDATER_RUNTIME_GENERATION: "2"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
