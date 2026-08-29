@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/server.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --skipLibCheck src/server.ts test/*.test.ts"
   },
   "dependencies": {
     "fastify": "^5.6.0"
