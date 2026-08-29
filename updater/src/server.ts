@@ -412,7 +412,7 @@ docker compose up -d --no-deps --force-recreate telegram-bot debug-collector
 echo "== Scheduling verified updater self-replacement =="
 docker run --rm -d \
   -e HOST_REPO_DIR="$HOST_REPO_DIR" \
-  -e EXPECTED_UPDATER_GENERATION="$runtimeGeneration" \
+  -e EXPECTED_UPDATER_GENERATION="${runtimeGeneration}" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$HOST_REPO_DIR:/workspace" \
   -w /workspace \
