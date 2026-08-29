@@ -17,6 +17,23 @@ export type BlocklistMatch = {
   matchedRule: string;
 };
 
+export type ListSourceDiagnostics = ListSource & {
+  cachedDomainCount: number;
+  uniqueDomainCount: number;
+  overlapDomainCount: number;
+  healthy: boolean;
+};
+
+export type BlocklistDiagnostics = {
+  items: ListSourceDiagnostics[];
+  configuredCount: number;
+  activeCount: number;
+  combinedDomainCount: number;
+  totalActiveEntries: number;
+  duplicateEntries: number;
+  unhealthyCount: number;
+};
+
 const MAX_LIST_BYTES = 25 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 20_000;
 
@@ -238,23 +255,82 @@ export class BlocklistManager {
     return combined.size;
   }
 
-  findMatch(domainValue: string): BlocklistMatch | null {
+  findMatches(domainValue: string): BlocklistMatch[] {
     const domain = normalizeDomain(domainValue);
-    if (!domain) return null;
+    if (!domain) return [];
 
     const sources = this.list();
     this.ensureSourceRulesFresh(sources);
 
+    const matches: BlocklistMatch[] = [];
     for (const source of sources) {
       if (!source.enabled) continue;
       const rules = this.sourceRules.get(source.id);
       if (!rules) continue;
 
       const matchedRule = findSuffixMatch(domain, rules);
-      if (matchedRule) return { source, matchedRule };
+      if (matchedRule) matches.push({ source, matchedRule });
     }
 
-    return null;
+    return matches;
+  }
+
+  findMatch(domainValue: string): BlocklistMatch | null {
+    return this.findMatches(domainValue)[0] ?? null;
+  }
+
+  diagnostics(): BlocklistDiagnostics {
+    const sources = this.list();
+    this.ensureSourceRulesFresh(sources);
+
+    const ownership = new Map<string, number>();
+    let totalActiveEntries = 0;
+
+    for (const source of sources) {
+      if (!source.enabled) continue;
+      const rules = this.sourceRules.get(source.id) ?? new Set<string>();
+      totalActiveEntries += rules.size;
+
+      for (const domain of rules) {
+        ownership.set(domain, (ownership.get(domain) ?? 0) + 1);
+      }
+    }
+
+    const items = sources.map(source => {
+      const cachedRules = this.rulesFromCache(source.id);
+      let uniqueDomainCount = 0;
+      let overlapDomainCount = 0;
+
+      if (source.enabled) {
+        for (const domain of cachedRules) {
+          if ((ownership.get(domain) ?? 0) > 1) {
+            overlapDomainCount++;
+          } else {
+            uniqueDomainCount++;
+          }
+        }
+      }
+
+      return {
+        ...source,
+        cachedDomainCount: cachedRules.size,
+        uniqueDomainCount,
+        overlapDomainCount,
+        healthy: source.lastError === null,
+      };
+    });
+
+    const combinedDomainCount = ownership.size;
+
+    return {
+      items,
+      configuredCount: sources.length,
+      activeCount: sources.filter(source => source.enabled).length,
+      combinedDomainCount,
+      totalActiveEntries,
+      duplicateEntries: Math.max(0, totalActiveEntries - combinedDomainCount),
+      unhealthyCount: sources.filter(source => source.lastError !== null).length,
+    };
   }
 
   async add(urlValue: string): Promise<ListSource> {
