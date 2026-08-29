@@ -98,6 +98,9 @@ await bot.setMyCommands([
   { command: "lists", description: "Gestisci blocklist esterne" },
   { command: "topblocked", description: "Domini più bloccati" },
   { command: "topallowed", description: "Domini più richiesti" },
+  { command: "yt_start", description: "Cattura YouTube: ad oppure video" },
+  { command: "yt_stop", description: "Ferma cattura YouTube" },
+  { command: "yt_report", description: "Confronta traffico ad/video YouTube" },
   { command: "profile", description: "Link profilo iPhone" },
   { command: "update", description: "Aggiorna AdBlock" },
   { command: "update_status", description: "Stato aggiornamento" },
@@ -403,6 +406,55 @@ function topSourceLabel(item: any): string {
   return "⚪ default";
 }
 
+function formatSeconds(value: unknown): string {
+  const seconds = Math.max(0, Math.round(Number(value ?? 0)));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+function youtubeReportView(report: any): string {
+  const adOnly = Array.isArray(report.adOnly) ? report.adOnly : [];
+  const shared = Array.isArray(report.shared) ? report.shared : [];
+
+  const lines = [
+    "🧪 YouTube DNS report",
+    `AD: ${report.ad?.sessions ?? 0} catture · ${formatSeconds(report.ad?.durationSec)}`,
+    `VIDEO: ${report.video?.sessions ?? 0} catture · ${formatSeconds(report.video?.durationSec)}`,
+    "",
+  ];
+
+  if (!report.ad?.sessions || !report.video?.sessions) {
+    lines.push("Servono almeno una cattura AD e una VIDEO per un confronto utile.");
+  } else if (!adOnly.length) {
+    lines.push("Nessun dominio AD-only rilevato finora.");
+  } else {
+    lines.push("🎯 Candidati AD-only:");
+    for (const [index, item] of adOnly.slice(0, 10).entries()) {
+      lines.push(
+        `${index + 1}. ${item.domain} — ${item.adCount} query · ${item.adSessions} catture AD`,
+      );
+    }
+  }
+
+  if (shared.length) {
+    lines.push("", "🔁 Condivisi AD/VIDEO:");
+    for (const item of shared.slice(0, 5)) {
+      lines.push(
+        `• ${item.domain} — AD ${item.adCount} / VIDEO ${item.videoCount}`,
+      );
+    }
+  }
+
+  lines.push(
+    "",
+    "⚠️ La cattura DNS riguarda tutto l’iPhone: un dominio AD-only è solo un candidato, non va bloccato automaticamente.",
+  );
+
+  return lines.join("\n");
+}
+
 function helpText(): string {
   return [
     "AdBlock bot commands:",
@@ -412,6 +464,10 @@ function helpText(): string {
     "/lists",
     "/topblocked",
     "/topallowed",
+    "/yt_start ad",
+    "/yt_start video",
+    "/yt_stop",
+    "/yt_report",
     "/reload",
     "/profile",
     "/update",
@@ -779,6 +835,55 @@ bot.on("message", async msg => {
         `${i + 1}. ${x.domain} — ${x.count} · ${topSourceLabel(x)}`
       );
       await sendTrackedMessage(chatId, lines.length ? lines.join("\n") : "No allowed domains yet.");
+      return;
+    }
+
+    const youtubeStartMatch = text.match(/^\/yt_start(?:@\w+)?\s+(ad|video)$/i);
+    if (youtubeStartMatch) {
+      const label = youtubeStartMatch[1].toLowerCase();
+      const result = await api("/admin/youtube/start", {
+        method: "POST",
+        body: JSON.stringify({ label }),
+      });
+
+      await sendTrackedMessage(
+        chatId,
+        [
+          `🧪 Cattura YouTube ${label === "ad" ? "AD" : "VIDEO"} avviata.`,
+          "",
+          label === "ad"
+            ? "Riproduci ora una pubblicità YouTube e usa /yt_stop appena termina."
+            : "Riproduci ora solo il contenuto video e usa /yt_stop dopo 1-2 minuti.",
+          "",
+          `Sessione: ${String(result.sessionId ?? "").slice(0, 8)}`,
+        ].join("\n"),
+      );
+      return;
+    }
+
+    if (/^\/yt_stop(?:@\w+)?$/i.test(text)) {
+      const result = await api("/admin/youtube/stop", {
+        method: "POST",
+        body: "{}",
+      });
+
+      await sendTrackedMessage(
+        chatId,
+        [
+          "⏹ Cattura YouTube terminata.",
+          `Tipo: ${result.label === "ad" ? "AD" : "VIDEO"}`,
+          `Domini osservati: ${result.domains ?? 0}`,
+          `Query DNS: ${result.queries ?? 0}`,
+          "",
+          "Dopo almeno una cattura AD e una VIDEO usa /yt_report.",
+        ].join("\n"),
+      );
+      return;
+    }
+
+    if (/^\/yt_report(?:@\w+)?$/i.test(text)) {
+      const report = await api("/admin/youtube/report");
+      await sendTrackedMessage(chatId, youtubeReportView(report));
       return;
     }
 
