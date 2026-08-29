@@ -76,6 +76,42 @@ describe("BlocklistManager attribution", () => {
     });
   });
 
+  it("reloads source attribution when another resolver refreshes the registry", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adblock-lists-"));
+    tempDirs.push(dir);
+
+    fs.mkdirSync(path.join(dir, "lists"), { recursive: true });
+    const registryPath = path.join(dir, "sources.json");
+    const cachePath = path.join(dir, "lists", "abc123def456.txt");
+    const externalPath = path.join(dir, "external-block.txt");
+
+    const source = {
+      id: "abc123def456",
+      url: "https://example.com/list.txt",
+      enabled: true,
+      addedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      domainCount: 1,
+      lastError: null,
+    };
+
+    fs.writeFileSync(registryPath, JSON.stringify([source]));
+    fs.writeFileSync(cachePath, "old.example.com\n");
+    fs.writeFileSync(externalPath, "old.example.com\n");
+
+    const manager = new BlocklistManager(dir, externalPath);
+    expect(manager.findMatch("a.old.example.com")?.matchedRule).toBe("old.example.com");
+
+    fs.writeFileSync(cachePath, "new.example.com\n");
+    fs.writeFileSync(registryPath, JSON.stringify([{
+      ...source,
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    }]));
+
+    expect(manager.findMatch("a.new.example.com")?.matchedRule).toBe("new.example.com");
+    expect(manager.findMatch("a.old.example.com")).toBeNull();
+  });
+
   it("ignores disabled lists when attributing a match", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adblock-lists-"));
     tempDirs.push(dir);
