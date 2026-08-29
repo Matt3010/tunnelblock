@@ -175,13 +175,13 @@ services:
         sleep 3
         echo "Recreating updater runtime..."
         docker compose up -d --no-deps --force-recreate updater
-        for i in $(seq 1 45); do
-          CID="$(docker compose ps -q updater 2>/dev/null || true)"
-          if [ -n "$CID" ]; then
-            STATE="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CID" 2>/dev/null || true)"
-            if [ "$STATE" = "healthy" ]; then
-              if curl -fsS                 -H "Authorization: Bearer $ADMIN_API_TOKEN"                 http://updater:8090/status                 | grep -Fq "\"runtimeGeneration\":\"$EXPECTED_UPDATER_GENERATION\""; then
-                echo "Updater runtime generation $EXPECTED_UPDATER_GENERATION is healthy."
+        for i in $$(seq 1 45); do
+          CID="$$(docker compose ps -q updater 2>/dev/null || true)"
+          if [ -n "$$CID" ]; then
+            STATE="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$$CID" 2>/dev/null || true)"
+            if [ "$$STATE" = "healthy" ]; then
+              if curl -fsS                 -H "Authorization: Bearer $$ADMIN_API_TOKEN"                 http://updater:8090/status                 | grep -Fq "\"runtimeGeneration\":\"$$EXPECTED_UPDATER_GENERATION\""; then
+                echo "Updater runtime generation $$EXPECTED_UPDATER_GENERATION is healthy."
                 exit 0
               fi
             fi
