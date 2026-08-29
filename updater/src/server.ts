@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import Fastify from "fastify";
@@ -17,13 +19,88 @@ const telegramUserIds = (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
   .map(v => v.trim())
   .filter(Boolean);
 
+type UpdateState = {
+  running: boolean;
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
+  lastSuccess: boolean | null;
+  lastOutput: string;
+  lastSeenRemoteSha: string | null;
+  failedRemoteSha: string | null;
+};
+
+const updaterStateFile = process.env.UPDATER_STATE_FILE ?? "/updater-data/state.json";
+const legacyRedisVolume =
+  process.env.LEGACY_REDIS_VOLUME ?? "adblock-general-purpose-redis-data";
+
+function loadUpdateState(): UpdateState {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(updaterStateFile, "utf8")) as Partial<UpdateState>;
+    return {
+      running: Boolean(parsed.running),
+      lastStartedAt: typeof parsed.lastStartedAt === "string" ? parsed.lastStartedAt : null,
+      lastFinishedAt: typeof parsed.lastFinishedAt === "string" ? parsed.lastFinishedAt : null,
+      lastSuccess: typeof parsed.lastSuccess === "boolean" ? parsed.lastSuccess : null,
+      lastOutput: typeof parsed.lastOutput === "string" ? parsed.lastOutput : "No update has run yet.",
+      lastSeenRemoteSha: typeof parsed.lastSeenRemoteSha === "string" ? parsed.lastSeenRemoteSha : null,
+      failedRemoteSha: typeof parsed.failedRemoteSha === "string" ? parsed.failedRemoteSha : null,
+    };
+  } catch {
+    return {
+      running: false,
+      lastStartedAt: null,
+      lastFinishedAt: null,
+      lastSuccess: null,
+      lastOutput: "No update has run yet.",
+      lastSeenRemoteSha: null,
+      failedRemoteSha: null,
+    };
+  }
+}
+
+const loadedState = loadUpdateState();
 let running = false;
-let lastStartedAt: string | null = null;
-let lastFinishedAt: string | null = null;
-let lastSuccess: boolean | null = null;
-let lastOutput = "No update has run yet.";
-let lastSeenRemoteSha: string | null = null;
-let failedRemoteSha: string | null = null;
+let lastStartedAt = loadedState.lastStartedAt;
+let lastFinishedAt = loadedState.lastFinishedAt;
+let lastSuccess = loadedState.lastSuccess;
+let lastOutput = loadedState.lastOutput;
+let lastSeenRemoteSha = loadedState.lastSeenRemoteSha;
+let failedRemoteSha = loadedState.failedRemoteSha;
+let persistTimer: NodeJS.Timeout | undefined;
+
+function persistUpdateState(): void {
+  fs.mkdirSync(path.dirname(updaterStateFile), { recursive: true });
+  const tmp = `${updaterStateFile}.tmp-${process.pid}`;
+  const state: UpdateState = {
+    running,
+    lastStartedAt,
+    lastFinishedAt,
+    lastSuccess,
+    lastOutput,
+    lastSeenRemoteSha,
+    failedRemoteSha,
+  };
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n");
+  fs.renameSync(tmp, updaterStateFile);
+}
+
+function schedulePersistUpdateState(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = undefined;
+    persistUpdateState();
+  }, 250);
+}
+
+if (loadedState.running) {
+  lastFinishedAt = new Date().toISOString();
+  lastSuccess = false;
+  lastOutput = tail(
+    loadedState.lastOutput +
+      "\nUpdater restarted while a deployment was running; previous deployment marked interrupted.\n",
+  );
+  persistUpdateState();
+}
 
 function authorized(request: any, reply: any): boolean {
   if (!token) {
@@ -135,6 +212,7 @@ function runUpdate(trigger: "manual" | "automatic" = "manual") {
   lastFinishedAt = null;
   lastSuccess = null;
   lastOutput = "";
+  persistUpdateState();
 
   void notifyTelegram(
     trigger === "automatic"
@@ -257,10 +335,12 @@ docker run --rm -d   -e HOST_REPO_DIR="$HOST_REPO_DIR"   -v /var/run/docker.sock
 
   child.stdout.on("data", chunk => {
     lastOutput = tail(lastOutput + chunk.toString());
+    schedulePersistUpdateState();
   });
 
   child.stderr.on("data", chunk => {
     lastOutput = tail(lastOutput + chunk.toString());
+    schedulePersistUpdateState();
   });
 
   child.on("close", code => {
@@ -268,6 +348,7 @@ docker run --rm -d   -e HOST_REPO_DIR="$HOST_REPO_DIR"   -v /var/run/docker.sock
     lastFinishedAt = new Date().toISOString();
     lastSuccess = code === 0;
     lastOutput = tail(lastOutput + `\nExit code: ${code}\n`);
+    persistUpdateState();
 
     void (async () => {
       if (code === 0) {
@@ -275,6 +356,7 @@ docker run --rm -d   -e HOST_REPO_DIR="$HOST_REPO_DIR"   -v /var/run/docker.sock
         try {
           lastSeenRemoteSha = await localSha();
         } catch {}
+        persistUpdateState();
         await notifyTelegram("✅ AdBlock aggiornato correttamente.");
       } else {
         try {
@@ -285,6 +367,7 @@ docker run --rm -d   -e HOST_REPO_DIR="$HOST_REPO_DIR"   -v /var/run/docker.sock
           );
           failedRemoteSha = stdout.trim();
         } catch {}
+        persistUpdateState();
         await notifyTelegram(
           `❌ Aggiornamento AdBlock fallito. Il deploy è stato fermato. Usa /update_status per i dettagli. Exit code: ${code}`,
         );
@@ -300,7 +383,10 @@ async function checkForUpdates(): Promise<void> {
     const remote = await fetchRemoteSha();
     const local = await localSha();
 
-    if (!lastSeenRemoteSha) lastSeenRemoteSha = local;
+    if (!lastSeenRemoteSha) {
+      lastSeenRemoteSha = local;
+      persistUpdateState();
+    }
 
     if (remote === failedRemoteSha) {
       app.log.warn({ remote }, "skipping-previously-failed-revision");
@@ -312,6 +398,7 @@ async function checkForUpdates(): Promise<void> {
       runUpdate("automatic");
     } else {
       lastSeenRemoteSha = remote;
+      schedulePersistUpdateState();
     }
   } catch (error) {
     app.log.error({ error }, "automatic-update-check-failed");
@@ -331,6 +418,7 @@ app.get("/status", async (request, reply) => {
     autoUpdate: true,
     githubAuthConfigured: Boolean(githubToken),
     pollIntervalSec,
+    statePersistent: true,
     currentSha,
     lastSeenRemoteSha,
     failedRemoteSha,
