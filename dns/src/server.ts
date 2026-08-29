@@ -309,18 +309,6 @@ app.get("/admin/status", async (request, reply) => {
   }
 });
 
-app.get("/admin/stats", async (request, reply) => {
-  if (!requireAdmin(request, reply)) return;
-
-  try {
-    return await getStats();
-  } catch (error) {
-    return reply.code(503).send({
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-});
-
 app.get("/admin/top", async (request, reply) => {
   if (!requireAdmin(request, reply)) return;
   const decision = (request.query as { decision?: string }).decision;
@@ -466,46 +454,6 @@ app.post("/admin/rules/by-key", async (request, reply) => {
 
     reloadRules();
     return { ok: true, action, domain, ...describeDomain(domain) };
-  } catch (error) {
-    return reply.code(400).send({
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-});
-
-app.post("/admin/rules", async (request, reply) => {
-  if (!requireAdmin(request, reply)) return;
-
-  try {
-    const body = request.body as { action?: string; domain?: string };
-    const action = body?.action;
-    const domain = normalizeDomain(body?.domain ?? "");
-
-    switch (action) {
-      case "block":
-        addRule(blockPath, domain);
-        removeRule(allowPath, domain);
-        break;
-      case "allow":
-        addRule(allowPath, domain);
-        removeRule(blockPath, domain);
-        break;
-      case "unblock":
-        removeRule(blockPath, domain);
-        break;
-      case "unallow":
-        removeRule(allowPath, domain);
-        break;
-      case "default":
-        removeRule(blockPath, domain);
-        removeRule(allowPath, domain);
-        break;
-      default:
-        return reply.code(400).send({ error: "invalid action" });
-    }
-
-    reloadRules();
-    return { ok: true, action, domain };
   } catch (error) {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : String(error),
