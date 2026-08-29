@@ -2,13 +2,12 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY dns/package*.json ./
 RUN npm install
 
-COPY tsconfig.json ./
-COPY src ./src
-COPY test ./test
-COPY ../rules /rules
+COPY dns/src ./src
+COPY dns/test ./test
+COPY rules /rules
 
 ENV HOST=0.0.0.0
 ENV PORT=8053
