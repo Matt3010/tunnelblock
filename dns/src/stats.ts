@@ -16,9 +16,55 @@ client.on("error", error => {
   console.error("redis-error", error instanceof Error ? error.message : String(error));
 });
 
-void client.connect().catch(error => {
-  console.error("redis-initial-connect-failed", error instanceof Error ? error.message : String(error));
-});
+let connectPromise: Promise<void> | null = null;
+
+async function startConnect(): Promise<void> {
+  if (client.isReady || client.isOpen) return;
+
+  if (!connectPromise) {
+    connectPromise = client
+      .connect()
+      .then(() => undefined)
+      .finally(() => {
+        connectPromise = null;
+      });
+  }
+
+  await connectPromise;
+}
+
+export async function ensureStatsReady(timeoutMs = 2500): Promise<boolean> {
+  if (client.isReady) return true;
+
+  if (!client.isOpen) {
+    try {
+      const connect = startConnect();
+      await Promise.race([
+        connect,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("redis connect timeout")), timeoutMs),
+        ),
+      ]);
+    } catch (error) {
+      console.error(
+        "redis-connect-attempt-failed",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  if (client.isReady) return true;
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (client.isReady) return true;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  return client.isReady;
+}
+
+void ensureStatsReady(1000);
 
 const KEYS = {
   stats: "adblock:stats",
@@ -37,7 +83,7 @@ export function makeDomainKey(domain: string): string {
 }
 
 export async function recordQuery(domain: string, decision: Decision): Promise<void> {
-  if (!client.isReady) return;
+  if (!(await ensureStatsReady(500))) return;
 
   const key = makeDomainKey(domain);
   const decisionKey = decision === "block" ? KEYS.blockedDomains : KEYS.allowedDomains;
@@ -52,7 +98,10 @@ export async function recordQuery(domain: string, decision: Decision): Promise<v
       .hSet(KEYS.domainKeys, key, domain)
       .exec();
   } catch (error) {
-    console.error("redis-record-query-failed", error instanceof Error ? error.message : String(error));
+    console.error(
+      "redis-record-query-failed",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -61,8 +110,14 @@ function parseCount(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+async function requireStatsReady(): Promise<void> {
+  if (!(await ensureStatsReady())) {
+    throw new Error("statistics storage unavailable");
+  }
+}
+
 export async function getStats() {
-  if (!client.isReady) throw new Error("statistics storage unavailable");
+  await requireStatsReady();
 
   const values = await client.hGetAll(KEYS.stats);
   const queries = parseCount(values.queries);
@@ -78,7 +133,7 @@ export async function getStats() {
 }
 
 async function zRevRangeWithScores(key: string, start: number, stop: number) {
-  if (!client.isReady) throw new Error("statistics storage unavailable");
+  await requireStatsReady();
 
   const raw = await client.sendCommand([
     "ZREVRANGE",
@@ -104,7 +159,7 @@ export async function getTop(decision: Decision, limit = 10) {
 }
 
 export async function getDomains(limit = 8, offset = 0) {
-  if (!client.isReady) throw new Error("statistics storage unavailable");
+  await requireStatsReady();
 
   const total = await client.zCard(KEYS.allDomains);
   const items = await zRevRangeWithScores(
@@ -123,6 +178,6 @@ export async function getDomains(limit = 8, offset = 0) {
 }
 
 export async function resolveDomainKey(key: string): Promise<string | undefined> {
-  if (!client.isReady) return undefined;
+  if (!(await ensureStatsReady())) return undefined;
   return (await client.hGet(KEYS.domainKeys, key)) ?? undefined;
 }
