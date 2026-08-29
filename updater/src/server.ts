@@ -67,21 +67,25 @@ async function fetchRemoteSha(): Promise<string> {
 
   const env = { ...process.env };
 
-  if (githubToken) {
-    await execFileAsync(
-      "git",
-      [
-        "-c",
-        `http.extraHeader=Authorization: Bearer ${githubToken}`,
-        "fetch",
-        "origin",
-        branch,
-      ],
-      { cwd: repoDir, env },
-    );
-  } else {
-    await execFileAsync("git", ["fetch", "origin", branch], { cwd: repoDir, env });
+  if (!githubToken) {
+    throw new Error("GITHUB_TOKEN is not configured");
   }
+
+  const auth = Buffer.from(`x-access-token:${githubToken}`).toString("base64");
+
+  await execFileAsync(
+    "git",
+    [
+      "-c",
+      `http.extraHeader=Authorization: Basic ${auth}`,
+      "-c",
+      "credential.helper=",
+      "fetch",
+      "origin",
+      branch,
+    ],
+    { cwd: repoDir, env },
+  );
 
   const { stdout } = await execFileAsync(
     "git",
@@ -118,11 +122,13 @@ cd "${repoDir}"
 
 git config --global --add safe.directory "${repoDir}"
 
-if [ -n "\${GITHUB_TOKEN:-}" ]; then
-  git -c http.extraHeader="Authorization: Bearer \${GITHUB_TOKEN}" fetch origin "${branch}"
-else
-  git fetch origin "${branch}"
+if [ -z "\${GITHUB_TOKEN:-}" ]; then
+  echo "GITHUB_TOKEN is not configured"
+  exit 2
 fi
+
+AUTH="$(printf 'x-access-token:%s' "\${GITHUB_TOKEN}" | base64 | tr -d '\n')"
+git -c http.extraHeader="Authorization: Basic $AUTH" -c credential.helper= fetch origin "${branch}"
 
 git reset --hard "origin/${branch}"
 
@@ -213,6 +219,7 @@ app.get("/status", async (request, reply) => {
   return {
     running,
     autoUpdate: true,
+    githubAuthConfigured: Boolean(githubToken),
     pollIntervalSec,
     currentSha,
     lastSeenRemoteSha,
