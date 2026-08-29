@@ -46,6 +46,7 @@
 
 ## M5 - YouTube experimental
 
+- [x] Persistent labeled AD/VIDEO DNS capture tooling
 - [ ] Measure what DNS-only filtering can block
 - [ ] Compare ad and non-ad playback DNS activity
 - [ ] Identify safe dedicated ad endpoints if any
