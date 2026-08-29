@@ -418,7 +418,15 @@ wait_ready doh-b || rollback_resolvers doh-b 22
 docker compose up -d --no-deps --force-recreate doh-proxy
 docker compose up -d --no-deps --force-recreate telegram-bot debug-api
 
-echo "== Runtime already generation 2; no legacy bootstrap required =="
+echo "== Scheduling verified updater self-replacement =="
+docker run --rm -d \
+  -e HOST_REPO_DIR="$HOST_REPO_DIR" \
+  -e EXPECTED_UPDATER_GENERATION="$runtimeGeneration" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$HOST_REPO_DIR:/workspace" \
+  -w /workspace \
+  adblock-general-purpose-updater:latest \
+  /replace-self.sh >/dev/null
 `;
 
   const child = spawn("/bin/sh", ["-c", script], {
