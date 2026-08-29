@@ -8,5 +8,7 @@ COPY updater/package*.json ./
 RUN npm install
 
 COPY updater/src ./src
+COPY updater/replace-self.sh /replace-self.sh
+RUN chmod +x /replace-self.sh
 
 CMD ["npm", "start"]
