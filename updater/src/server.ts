@@ -418,8 +418,7 @@ wait_ready doh-b || rollback_resolvers doh-b 22
 docker compose up -d --no-deps --force-recreate doh-proxy
 docker compose up -d --no-deps --force-recreate telegram-bot debug-api
 
-echo "== Scheduling updater replacement watchdog =="
-docker compose up -d --no-deps --force-recreate updater-replacer
+echo "== Runtime already generation 2; no legacy bootstrap required =="
 `;
 
   const child = spawn("/bin/sh", ["-c", script], {
