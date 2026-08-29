@@ -232,7 +232,7 @@ async function deploymentHelperExists(): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync(
       "docker",
-      ["ps", "-aq", "--filter", `name=^${helperName}$`],
+      ["ps", "-q", "--filter", `name=${helperName}`],
       { env: process.env },
     );
     return Boolean(stdout.trim());
