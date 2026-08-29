@@ -16,6 +16,18 @@ if (!adminToken) throw new Error("ADMIN_API_TOKEN is required");
 
 const bot = new TelegramBot(token, { polling: true });
 
+await bot.setMyCommands([
+  { command: "status", description: "Stato del resolver DoH" },
+  { command: "stats", description: "Statistiche DNS" },
+  { command: "domains", description: "Gestisci domini Allow / Block" },
+  { command: "topblocked", description: "Domini più bloccati" },
+  { command: "topallowed", description: "Domini più richiesti" },
+  { command: "profile", description: "Link profilo iPhone" },
+  { command: "update", description: "Aggiorna AdBlock" },
+  { command: "update_status", description: "Stato aggiornamento" },
+  { command: "help", description: "Mostra i comandi" },
+]);
+
 function isAllowed(userId?: number): boolean {
   if (!userId) return false;
   return allowed.has(String(userId));
