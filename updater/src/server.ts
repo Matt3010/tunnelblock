@@ -211,7 +211,7 @@ async function refreshExternalBlocklists(): Promise<void> {
   if (!token) return;
 
   try {
-    const response = await fetch("http://doh-proxy:8053/admin/lists/refresh", {
+    const response = await fetch("http://doh-a:8053/admin/lists/refresh", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -306,7 +306,7 @@ if ! docker compose config --quiet; then
 fi
 
 echo "== Pre-flight: build all deployment images =="
-if ! docker compose build doh-proxy updater doh-a doh-b telegram-bot debug-collector; then
+if ! docker compose build doh-proxy updater doh-a doh-b telegram-bot; then
   echo "Image build failed; restoring previous checkout."
   git reset --hard "$PREVIOUS_SHA"
   exit 11
@@ -407,7 +407,7 @@ docker compose up -d --no-deps doh-b
 wait_ready doh-b || rollback_resolvers doh-b 22
 
 docker compose up -d --no-deps --force-recreate doh-proxy
-docker compose up -d --no-deps --force-recreate telegram-bot debug-collector
+docker compose up -d --no-deps --force-recreate telegram-bot
 
 echo "== Scheduling verified updater self-replacement =="
 docker run --rm -d \
