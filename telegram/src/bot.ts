@@ -668,7 +668,7 @@ bot.on("message", async msg => {
         : `ERRORE: ${updaterResult.reason instanceof Error ? updaterResult.reason.message : String(updaterResult.reason)}`;
 
       const runtimeLine = updaterResult.status === "fulfilled"
-        ? `Runtime: updater gen ${updaterResult.value.runtimeGeneration ?? "legacy"} · bot gen ${botRuntimeGeneration}`
+        ? `Runtime: updater gen ${updaterResult.value.runtimeGeneration ?? "legacy"} @ ${String(updaterResult.value.runtimeBuildSha ?? "unknown").slice(0, 8)} · bot gen ${botRuntimeGeneration}`
         : `Runtime: bot gen ${botRuntimeGeneration}`;
 
       const serviceLines = updaterResult.status === "fulfilled" && updaterResult.value.services
