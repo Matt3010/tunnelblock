@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import { parseQuestion, buildBlockedResponse } from "./dns.js";
 import { RuleEngine } from "./rules.js";
+import { BlocklistManager } from "./lists.js";
 import {
   getDomains,
   getStats,
@@ -18,8 +19,10 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
-const blockPath = path.join(root, "rules/block.txt");
-const allowPath = path.join(root, "rules/allow.txt");
+const rulesDir = path.join(root, "rules");
+const blockPath = path.join(rulesDir, "block.txt");
+const allowPath = path.join(rulesDir, "allow.txt");
+const externalBlockPath = path.join(rulesDir, "external-block.txt");
 
 const app = Fastify({
   logger: true,
@@ -32,7 +35,8 @@ app.addContentTypeParser(
   (_request, body, done) => done(null, body),
 );
 
-let rules = RuleEngine.fromFiles(blockPath, allowPath);
+const blocklists = new BlocklistManager(rulesDir, externalBlockPath);
+let rules = RuleEngine.fromFiles(blockPath, allowPath, externalBlockPath);
 
 const upstreamHost = process.env.UPSTREAM_DNS_HOST ?? "1.1.1.1";
 const upstreamPort = Number(process.env.UPSTREAM_DNS_PORT ?? 53);
@@ -51,12 +55,12 @@ function activeRules(file: string): Set<string> {
   );
 }
 
-function domainState(domain: string): "allow" | "block" | "default" {
-  const allowed = activeRules(allowPath);
-  const blocked = activeRules(blockPath);
+function domainState(domain: string): "allow" | "block" | "list" | "default" {
+  const detail = rules.decideDetailed(domain);
 
-  if (allowed.has(domain)) return "allow";
-  if (blocked.has(domain)) return "block";
+  if (detail.source === "manual-allow") return "allow";
+  if (detail.source === "manual-block") return "block";
+  if (detail.source === "external-block") return "list";
   return "default";
 }
 
@@ -132,12 +136,12 @@ function removeRule(file: string, domain: string) {
 }
 
 function reloadRules() {
-  rules = RuleEngine.fromFiles(blockPath, allowPath);
+  rules = RuleEngine.fromFiles(blockPath, allowPath, externalBlockPath);
 }
 
 let reloadTimer: NodeJS.Timeout | undefined;
 fs.watch(path.dirname(blockPath), (_eventType, filename) => {
-  if (filename !== "block.txt" && filename !== "allow.txt") return;
+  if (filename !== "block.txt" && filename !== "allow.txt" && filename !== "external-block.txt") return;
   if (reloadTimer) clearTimeout(reloadTimer);
   reloadTimer = setTimeout(() => {
     try {
@@ -220,7 +224,8 @@ async function forwardUdp(packet: Buffer): Promise<Buffer> {
 
 async function resolveDns(packet: Buffer): Promise<Buffer> {
   const question = parseQuestion(packet);
-  const decision = rules.decide(question.qname);
+  const detail = rules.decideDetailed(question.qname);
+  const decision = detail.decision;
 
   void recordQuery(question.qname, decision);
 
@@ -228,6 +233,7 @@ async function resolveDns(packet: Buffer): Promise<Buffer> {
     qname: question.qname,
     qtype: question.qtype,
     decision,
+    decisionSource: detail.source,
     bytes: packet.length,
   }, "dns-query");
 
@@ -257,6 +263,8 @@ app.get("/admin/status", async (request, reply) => {
       ok: true,
       uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
       statsStorage: "redis",
+      blocklists: blocklists.list().length,
+      externalBlockedDomains: blocklists.combinedDomainCount(),
       ...stats,
     };
   } catch (error) {
@@ -306,6 +314,87 @@ app.get("/admin/domains", async (request, reply) => {
     return await domainItems(limit, offset);
   } catch (error) {
     return reply.code(503).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get("/admin/lists", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+  return {
+    items: blocklists.list(),
+    combinedDomainCount: blocklists.combinedDomainCount(),
+  };
+});
+
+app.post("/admin/lists", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    const body = request.body as { url?: string };
+    const source = await blocklists.add(body?.url ?? "");
+    reloadRules();
+    return reply.code(201).send({ ok: true, source });
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post("/admin/lists/refresh", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  const result = await blocklists.refreshAll();
+  reloadRules();
+  return { ok: result.failed === 0, ...result };
+});
+
+app.post("/admin/lists/:id/refresh", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    const { id } = request.params as { id: string };
+    const source = await blocklists.refresh(id);
+    reloadRules();
+    return { ok: true, source };
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post("/admin/lists/:id/enabled", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    const { id } = request.params as { id: string };
+    const body = request.body as { enabled?: boolean };
+    if (typeof body?.enabled !== "boolean") {
+      return reply.code(400).send({ error: "enabled must be boolean" });
+    }
+
+    const source = blocklists.setEnabled(id, body.enabled);
+    reloadRules();
+    return { ok: true, source };
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.delete("/admin/lists/:id", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    const { id } = request.params as { id: string };
+    blocklists.remove(id);
+    reloadRules();
+    return { ok: true };
+  } catch (error) {
+    return reply.code(400).send({
       error: error instanceof Error ? error.message : String(error),
     });
   }
