@@ -42,8 +42,8 @@ cd "${repoDir}"
 
 git config --global --add safe.directory "${repoDir}"
 
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-  git -c http.extraHeader="Authorization: Bearer ${GITHUB_TOKEN}" fetch origin "${branch}"
+if [ -n "\${GITHUB_TOKEN:-}" ]; then
+  git -c http.extraHeader="Authorization: Bearer \${GITHUB_TOKEN}" fetch origin "${branch}"
 else
   git fetch origin "${branch}"
 fi
