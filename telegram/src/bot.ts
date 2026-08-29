@@ -6,6 +6,7 @@ const token = process.env.TELEGRAM_BOT_TOKEN;
 const adminBase = process.env.ADMIN_API_BASE ?? "http://doh:8053";
 const updaterBase = process.env.UPDATER_API_BASE ?? "http://updater:8090";
 const adminToken = process.env.ADMIN_API_TOKEN;
+const botRuntimeGeneration = process.env.BOT_RUNTIME_GENERATION ?? "unknown";
 const allowed = new Set(
   (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
     .split(",")
@@ -666,6 +667,10 @@ bot.on("message", async msg => {
         ? `${updaterResult.value.running ? "running" : (updaterResult.value.lastSuccess === true ? "success" : updaterResult.value.lastSuccess === false ? "failed" : "idle")} @ ${updaterResult.value.currentSha ?? "-"}`
         : `ERRORE: ${updaterResult.reason instanceof Error ? updaterResult.reason.message : String(updaterResult.reason)}`;
 
+      const runtimeLine = updaterResult.status === "fulfilled"
+        ? `Runtime: updater gen ${updaterResult.value.runtimeGeneration ?? "legacy"} · bot gen ${botRuntimeGeneration}`
+        : `Runtime: bot gen ${botRuntimeGeneration}`;
+
       const serviceLines = updaterResult.status === "fulfilled" && updaterResult.value.services
         ? [
             `doh-a: ${updaterResult.value.services.dohA ?? "unknown"}`,
@@ -682,6 +687,7 @@ bot.on("message", async msg => {
           `Resolver: ${health}`,
           `Storage ready: ${ready}`,
           `Updater: ${updater}`,
+          runtimeLine,
           ...serviceLines,
         ].join("\n"),
       );
