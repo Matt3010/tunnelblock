@@ -1,5 +1,1 @@
-# Seed block list for MVP testing only.
-doubleclick.net
-googleadservices.com
-googlesyndication.com
-app-measurement.com
+# Manual block rules. Empty by default; manage via Telegram.
