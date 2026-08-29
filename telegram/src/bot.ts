@@ -92,6 +92,7 @@ async function cleanupTrackedMessages() {
 
 await bot.setMyCommands([
   { command: "status", description: "Stato del resolver DoH" },
+  { command: "diag", description: "Diagnostica resolver e storage" },
   { command: "stats", description: "Statistiche DNS" },
   { command: "domains", description: "Gestisci domini Allow / Block" },
   { command: "lists", description: "Gestisci blocklist esterne" },
@@ -340,6 +341,7 @@ function helpText(): string {
   return [
     "AdBlock bot commands:",
     "/status",
+    "/diag",
     "/stats",
     "/domains",
     "/lists",
@@ -623,6 +625,33 @@ bot.on("message", async msg => {
       );
       return;
     }
+
+    if (text === "/diag") {
+      const [healthResult, readyResult, updaterResult] = await Promise.allSettled([
+        api("/health"),
+        api("/ready"),
+        updaterApi("/status"),
+      ]);
+
+      const health = healthResult.status === "fulfilled"
+        ? `OK (${healthResult.value.statsStorage ?? "unknown"})`
+        : `ERRORE: ${healthResult.reason instanceof Error ? healthResult.reason.message : String(healthResult.reason)}`;
+
+      const ready = readyResult.status === "fulfilled"
+        ? `OK (${readyResult.value.statsStorage ?? "unknown"})`
+        : `ERRORE: ${readyResult.reason instanceof Error ? readyResult.reason.message : String(readyResult.reason)}`;
+
+      const updater = updaterResult.status === "fulfilled"
+        ? `${updaterResult.value.running ? "running" : (updaterResult.value.lastSuccess === true ? "success" : updaterResult.value.lastSuccess === false ? "failed" : "idle")} @ ${updaterResult.value.currentSha ?? "-"}`
+        : `ERRORE: ${updaterResult.reason instanceof Error ? updaterResult.reason.message : String(updaterResult.reason)}`;
+
+      await sendTrackedMessage(
+        chatId,
+        `🩺 Diagnostica\nResolver: ${health}\nStorage ready: ${ready}\nUpdater: ${updater}`,
+      );
+      return;
+    }
+
 
     if (text === "/stats") {
       const s = await api("/admin/stats");
