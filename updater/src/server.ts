@@ -1,17 +1,27 @@
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import Fastify from "fastify";
 
+const execFileAsync = promisify(execFile);
 const app = Fastify({ logger: true });
+
 const token = process.env.ADMIN_API_TOKEN;
 const githubToken = process.env.GITHUB_TOKEN;
 const repoDir = process.env.REPO_DIR ?? "/workspace";
 const branch = process.env.GIT_BRANCH ?? "master";
+const pollIntervalSec = Number(process.env.AUTO_UPDATE_INTERVAL_SEC ?? 300);
+const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+const telegramUserIds = (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
+  .split(",")
+  .map(v => v.trim())
+  .filter(Boolean);
 
 let running = false;
 let lastStartedAt: string | null = null;
 let lastFinishedAt: string | null = null;
 let lastSuccess: boolean | null = null;
 let lastOutput = "No update has run yet.";
+let lastSeenRemoteSha: string | null = null;
 
 function authorized(request: any, reply: any): boolean {
   if (!token) {
@@ -29,12 +39,78 @@ function tail(value: string, max = 12000): string {
   return value.length <= max ? value : value.slice(-max);
 }
 
-function runUpdate() {
+async function notifyTelegram(message: string): Promise<void> {
+  if (!telegramToken || telegramUserIds.length === 0) return;
+
+  for (const chatId of telegramUserIds) {
+    try {
+      await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+        }),
+      });
+    } catch (error) {
+      app.log.error({ error, chatId }, "telegram-notification-failed");
+    }
+  }
+}
+
+async function fetchRemoteSha(): Promise<string> {
+  await execFileAsync(
+    "git",
+    ["config", "--global", "--add", "safe.directory", repoDir],
+    { cwd: repoDir },
+  ).catch(() => {});
+
+  const env = { ...process.env };
+
+  if (githubToken) {
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        `http.extraHeader=Authorization: Bearer ${githubToken}`,
+        "fetch",
+        "origin",
+        branch,
+      ],
+      { cwd: repoDir, env },
+    );
+  } else {
+    await execFileAsync("git", ["fetch", "origin", branch], { cwd: repoDir, env });
+  }
+
+  const { stdout } = await execFileAsync(
+    "git",
+    ["rev-parse", `origin/${branch}`],
+    { cwd: repoDir, env },
+  );
+
+  return stdout.trim();
+}
+
+async function localSha(): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+    cwd: repoDir,
+  });
+  return stdout.trim();
+}
+
+function runUpdate(trigger: "manual" | "automatic" = "manual") {
   running = true;
   lastStartedAt = new Date().toISOString();
   lastFinishedAt = null;
   lastSuccess = null;
   lastOutput = "";
+
+  void notifyTelegram(
+    trigger === "automatic"
+      ? "🔄 Nuovo push su master rilevato. Aggiornamento AdBlock avviato."
+      : "🔄 Aggiornamento AdBlock avviato.",
+  );
 
   const script = `
 set -eu
@@ -80,6 +156,7 @@ docker compose up -d --no-deps telegram-bot debug-collector
   child.stdout.on("data", chunk => {
     lastOutput = tail(lastOutput + chunk.toString());
   });
+
   child.stderr.on("data", chunk => {
     lastOutput = tail(lastOutput + chunk.toString());
   });
@@ -89,15 +166,56 @@ docker compose up -d --no-deps telegram-bot debug-collector
     lastFinishedAt = new Date().toISOString();
     lastSuccess = code === 0;
     lastOutput = tail(lastOutput + `\nExit code: ${code}\n`);
+
+    void (async () => {
+      if (code === 0) {
+        try {
+          lastSeenRemoteSha = await localSha();
+        } catch {}
+        await notifyTelegram("✅ AdBlock aggiornato correttamente.");
+      } else {
+        await notifyTelegram(
+          `❌ Aggiornamento AdBlock fallito. Usa /update_status per i dettagli. Exit code: ${code}`,
+        );
+      }
+    })();
   });
+}
+
+async function checkForUpdates(): Promise<void> {
+  if (running) return;
+
+  try {
+    const remote = await fetchRemoteSha();
+    const local = await localSha();
+
+    if (!lastSeenRemoteSha) lastSeenRemoteSha = local;
+
+    if (remote !== local) {
+      app.log.info({ local, remote }, "new-master-revision-detected");
+      runUpdate("automatic");
+    } else {
+      lastSeenRemoteSha = remote;
+    }
+  } catch (error) {
+    app.log.error({ error }, "automatic-update-check-failed");
+  }
 }
 
 app.get("/health", async () => ({ ok: true }));
 
 app.get("/status", async (request, reply) => {
   if (!authorized(request, reply)) return;
+
+  let currentSha: string | null = null;
+  try { currentSha = await localSha(); } catch {}
+
   return {
     running,
+    autoUpdate: true,
+    pollIntervalSec,
+    currentSha,
+    lastSeenRemoteSha,
     lastStartedAt,
     lastFinishedAt,
     lastSuccess,
@@ -109,7 +227,7 @@ app.post("/update", async (request, reply) => {
   if (!authorized(request, reply)) return;
   if (running) return reply.code(409).send({ error: "update already running" });
 
-  runUpdate();
+  runUpdate("manual");
   return reply.code(202).send({ ok: true, started: true });
 });
 
@@ -117,3 +235,6 @@ await app.listen({
   host: "0.0.0.0",
   port: Number(process.env.PORT ?? 8090),
 });
+
+setTimeout(() => void checkForUpdates(), 10_000);
+setInterval(() => void checkForUpdates(), pollIntervalSec * 1000);
