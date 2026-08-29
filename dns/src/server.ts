@@ -11,10 +11,14 @@ import {
   getDomains,
   getStats,
   getTop,
+  getYouTubeCaptureStatus,
+  getYouTubeReport,
   makeDomainKey,
   recordQuery,
   resolveDomainKey,
+  startYouTubeCapture,
   statsReady,
+  stopYouTubeCapture,
   ensureStatsReady,
 } from "./stats.js";
 
@@ -438,6 +442,61 @@ app.post("/admin/reload", async (request, reply) => {
   if (!requireAdmin(request, reply)) return;
   reloadRules();
   return { ok: true };
+});
+
+app.get("/admin/youtube/status", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    return await getYouTubeCaptureStatus();
+  } catch (error) {
+    return reply.code(503).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post("/admin/youtube/start", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    const body = request.body as { label?: string };
+    const session = await startYouTubeCapture(body?.label ?? "");
+    return reply.code(201).send({ ok: true, ...session });
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post("/admin/youtube/stop", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    const session = await stopYouTubeCapture();
+    return { ok: true, ...session };
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get("/admin/youtube/report", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    const report = await getYouTubeReport(20);
+    return {
+      ...report,
+      note: "DNS capture is device-wide; ad-only domains are candidates, not proof that a domain is safe to block.",
+    };
+  } catch (error) {
+    return reply.code(503).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 app.post("/admin/rules/by-key", async (request, reply) => {
