@@ -54,6 +54,59 @@ function top(map: Map<string, number>, limit = 10) {
     .map(([domain, count]) => ({ domain, count }));
 }
 
+function activeRules(file: string): Set<string> {
+  return new Set(
+    readRuleLines(file)
+      .map(line => line.trim().toLowerCase())
+      .filter(line => line && !line.startsWith("#")),
+  );
+}
+
+function domainKey(domain: string): string {
+  return crypto.createHash("sha256").update(domain).digest("hex").slice(0, 16);
+}
+
+function domainState(domain: string): "allow" | "block" | "default" {
+  const allowed = activeRules(allowPath);
+  const blocked = activeRules(blockPath);
+
+  if (allowed.has(domain)) return "allow";
+  if (blocked.has(domain)) return "block";
+  return "default";
+}
+
+function domainItems(limit = 12) {
+  const counts = new Map<string, number>();
+
+  for (const [domain, count] of allowedDomains) {
+    counts.set(domain, (counts.get(domain) ?? 0) + count);
+  }
+  for (const [domain, count] of blockedDomains) {
+    counts.set(domain, (counts.get(domain) ?? 0) + count);
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([domain, count]) => ({
+      key: domainKey(domain),
+      domain,
+      count,
+      state: domainState(domain),
+    }));
+}
+
+function resolveObservedDomain(key: string): string | undefined {
+  const domains = new Set<string>([
+    ...allowedDomains.keys(),
+    ...blockedDomains.keys(),
+    ...activeRules(allowPath),
+    ...activeRules(blockPath),
+  ]);
+
+  return [...domains].find(domain => domainKey(domain) === key);
+}
+
 function requireAdmin(request: any, reply: any): boolean {
   if (!adminToken) {
     reply.code(503).send({ error: "ADMIN_API_TOKEN not configured" });
@@ -254,10 +307,47 @@ app.get("/admin/top", async (request, reply) => {
   return { items: top(decision === "block" ? blockedDomains : allowedDomains) };
 });
 
+app.get("/admin/domains", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+  const requested = Number((request.query as { limit?: string }).limit ?? 12);
+  const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 20) : 12;
+  return { items: domainItems(limit) };
+});
+
 app.post("/admin/reload", async (request, reply) => {
   if (!requireAdmin(request, reply)) return;
   reloadRules();
   return { ok: true };
+});
+
+app.post("/admin/rules/by-key", async (request, reply) => {
+  if (!requireAdmin(request, reply)) return;
+
+  try {
+    const body = request.body as { action?: string; key?: string };
+    const action = body?.action;
+    const key = body?.key ?? "";
+    const domain = resolveObservedDomain(key);
+
+    if (!domain) return reply.code(404).send({ error: "domain not found" });
+
+    if (action === "block") {
+      addRule(blockPath, domain);
+      removeRule(allowPath, domain);
+    } else if (action === "allow") {
+      addRule(allowPath, domain);
+      removeRule(blockPath, domain);
+    } else {
+      return reply.code(400).send({ error: "invalid action" });
+    }
+
+    reloadRules();
+    return { ok: true, action, domain, state: action };
+  } catch (error) {
+    return reply.code(400).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 app.post("/admin/rules", async (request, reply) => {
@@ -275,6 +365,7 @@ app.post("/admin/rules", async (request, reply) => {
         break;
       case "allow":
         addRule(allowPath, domain);
+        removeRule(blockPath, domain);
         break;
       case "unblock":
         removeRule(blockPath, domain);
