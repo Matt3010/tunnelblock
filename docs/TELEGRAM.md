@@ -6,21 +6,32 @@ The Telegram bot is the remote control panel for the DoH resolver.
 
 ```text
 /status
-/stats
+/diag
+/domains
+/lists
 /topblocked
 /topallowed
-/block example.com
-/allow example.com
-/unblock example.com
-/unallow example.com
 /reload
 /profile
+/update
+/update_status
 /help
 ```
 
+### Blocklist diagnostics
+
+`/lists` shows configured/active lists, unique combined domains, overlap between lists,
+cached domain counts, per-list unique coverage and refresh errors.
+
+`/domains` shows the current DNS decision, the effective matching rule and every enabled
+external blocklist that currently matches the selected domain.
+
+`/topblocked` and `/topallowed` enrich the query counters with the rule source that is
+currently active for each domain.
+
 The bot does not execute arbitrary shell commands.
 
-It talks only to the internal authenticated DoH admin API.
+It talks only to the authenticated resolver/updater APIs on the Docker network.
 
 ## Required environment variables
 
@@ -35,6 +46,6 @@ ADMIN_API_TOKEN
 ## Security
 
 - Do not commit Telegram tokens.
-- Do not expose the internal admin API publicly.
-- The bot container calls `http://doh:8053/admin/*` over the Docker network.
-- Rules are mounted from `./rules:/rules`, so manual block/allow changes persist on the Raspberry Pi.
+- The public reverse proxy does not forward `/admin/*`.
+- The bot talks directly to the resolver on the Docker network.
+- Rules and external-list caches are persisted under the mounted rules directory.
