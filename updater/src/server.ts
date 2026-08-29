@@ -196,9 +196,9 @@ async function serviceRuntimeState(service: string): Promise<string> {
       "docker",
       [
         "inspect",
-        containerId,
         "--format",
         "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+        containerId,
       ],
       { cwd: repoDir, env: process.env },
     );
@@ -209,7 +209,10 @@ async function serviceRuntimeState(service: string): Promise<string> {
 }
 
 async function cleanupLegacyRedis(): Promise<void> {
-  if (running) return;
+  if (running) {
+    setTimeout(() => void cleanupLegacyRedis(), 60_000);
+    return;
+  }
 
   try {
     await execFileAsync("docker", ["compose", "--profile", "legacy-bootstrap", "rm", "-sf", "redis"], {
@@ -347,7 +350,7 @@ service_ready() {
   CID="$(docker compose ps -q --all "$SERVICE" 2>/dev/null || true)"
   [ -n "$CID" ] || return 1
 
-  STATUS="$(docker inspect "$CID" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+  STATUS="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CID" 2>/dev/null || true)"
   [ "$STATUS" = "healthy" ]
 }
 
