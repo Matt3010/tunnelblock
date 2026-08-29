@@ -83,7 +83,7 @@ export function statsReady(): boolean {
   }
 }
 
-export async function ensureStatsReady(): Promise<boolean> {
+export async function ensureStatsReady(_timeoutMs?: number): Promise<boolean> {
   return statsReady();
 }
 
