@@ -1,0 +1,11 @@
+services:
+  debug-collector:
+    build:
+      context: ./server
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      DEBUG_TOKEN: ${DEBUG_TOKEN:-change-me}
+    ports:
+      - "8787:8787"
