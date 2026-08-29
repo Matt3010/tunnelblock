@@ -10,37 +10,22 @@ services:
     ports:
       - "8787:8787"
 
-  dns:
-    image: alpine:3.22
+  doh:
+    image: node:24-alpine
     restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
+    working_dir: /workspace/dns
     command:
       - /bin/sh
       - -lc
       - |
-        apk add --no-cache dnsmasq nodejs &&
-        node /workspace/dns/build-block-hosts.mjs &&
-        dnsmasq --no-daemon --conf-file=/workspace/dns/dnsmasq.conf
+        npm install &&
+        npm start
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8053
+      UPSTREAM_DNS_HOST: 1.1.1.1
+      UPSTREAM_DNS_PORT: 53
     volumes:
       - ./:/workspace:ro
-      - ./dns/block.hosts:/etc/adblock/block.hosts
-    network_mode: host
-
-  strongswan:
-    image: strongx509/strongswan:latest
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    network_mode: host
-    volumes:
-      - ./vpn/strongswan:/etc/swanctl:ro
-      - ./vpn/certs:/etc/swanctl/x509:ro
-      - ./vpn/private:/etc/swanctl/private:ro
-    command:
-      - /bin/sh
-      - -lc
-      - |
-        swanctl --load-all &&
-        tail -f /dev/null
+    ports:
+      - "8053:8053"
