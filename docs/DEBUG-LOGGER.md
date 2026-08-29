@@ -1,26 +1,28 @@
 # Raspberry Pi debug logger
 
-Run:
+Run the collector on the Raspberry Pi:
 
 ```bash
 cd server
 npm install
-DEBUG_TOKEN=change-me npm run debug-server
+DEBUG_TOKEN=<your-secret-token> npm run debug-server
 ```
 
-Default endpoint:
+Public collector:
 
 ```text
-POST http://raspberry-pi:8787/events
-GET  http://raspberry-pi:8787/health
+POST https://adblock.scanferlamatteo.work/events
+GET  https://adblock.scanferlamatteo.work/health
 ```
 
 Client environment:
 
 ```bash
-DEBUG_ENDPOINT=http://raspberry-pi:8787/events
-DEBUG_TOKEN=change-me
+DEBUG_ENDPOINT=https://adblock.scanferlamatteo.work/events
+DEBUG_TOKEN=<your-secret-token>
 ```
+
+The token must remain outside Git and should be supplied only through the runtime environment.
 
 ## Payload policy for the development phase
 
