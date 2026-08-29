@@ -13,6 +13,8 @@ const repoDir = process.env.REPO_DIR ?? "/workspace";
 const branch = process.env.GIT_BRANCH ?? "master";
 const pollIntervalSec = Number(process.env.AUTO_UPDATE_INTERVAL_SEC ?? 300);
 const listRefreshIntervalHours = Number(process.env.LIST_REFRESH_INTERVAL_HOURS ?? 24);
+const runtimeGeneration = process.env.UPDATER_RUNTIME_GENERATION ?? "unknown";
+const runtimeStartedAt = new Date().toISOString();
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const telegramUserIds = (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
   .split(",")
@@ -414,10 +416,16 @@ docker compose up -d --no-deps doh-b
 wait_ready doh-b || rollback_resolvers doh-b 22
 
 docker compose up -d --no-deps --force-recreate doh-proxy
-docker compose up -d --no-deps telegram-bot debug-collector
+docker compose up -d --no-deps --force-recreate telegram-bot debug-collector
 
 echo "== Scheduling updater self-replacement =="
-docker run --rm -d   -e HOST_REPO_DIR="$HOST_REPO_DIR"   -v /var/run/docker.sock:/var/run/docker.sock   -v "$HOST_REPO_DIR:/workspace"   -w /workspace   adblock-general-purpose-updater:latest   sh -lc 'sleep 5; docker compose up -d --no-deps updater' >/dev/null
+docker run --rm -d \
+  -e HOST_REPO_DIR="$HOST_REPO_DIR" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$HOST_REPO_DIR:/workspace" \
+  -w /workspace \
+  adblock-general-purpose-updater:latest \
+  sh -lc 'set -eu; sleep 5; docker compose up -d --no-deps --force-recreate updater; for i in $(seq 1 30); do CID=$(docker compose ps -q updater); [ -n "$CID" ] && S=$(docker inspect --format "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" "$CID" 2>/dev/null || true) && [ "$S" = "healthy" ] && exit 0; sleep 1; done; exit 1' >/dev/null
 `;
 
   const child = spawn("/bin/sh", ["-c", script], {
@@ -520,6 +528,8 @@ app.get("/status", async (request, reply) => {
     githubAuthConfigured: Boolean(githubToken),
     pollIntervalSec,
     statePersistent: true,
+    runtimeGeneration,
+    runtimeStartedAt,
     currentSha,
     services: {
       dohA,
