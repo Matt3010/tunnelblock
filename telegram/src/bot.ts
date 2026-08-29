@@ -93,7 +93,6 @@ async function cleanupTrackedMessages() {
 await bot.setMyCommands([
   { command: "status", description: "Stato del resolver DoH" },
   { command: "diag", description: "Diagnostica resolver e storage" },
-  { command: "stats", description: "Statistiche DNS" },
   { command: "domains", description: "Gestisci domini Allow / Block" },
   { command: "lists", description: "Gestisci blocklist esterne" },
   { command: "topblocked", description: "Domini più bloccati" },
@@ -342,7 +341,6 @@ function helpText(): string {
     "AdBlock bot commands:",
     "/status",
     "/diag",
-    "/stats",
     "/domains",
     "/lists",
     "/topblocked",
@@ -648,15 +646,6 @@ bot.on("message", async msg => {
       await sendTrackedMessage(
         chatId,
         `🩺 Diagnostica\nResolver: ${health}\nStorage ready: ${ready}\nUpdater: ${updater}`,
-      );
-      return;
-    }
-
-
-    if (text === "/stats") {
-      const s = await api("/admin/stats");
-      await sendTrackedMessage(chatId,
-        `Queries: ${s.queries}\nAllowed: ${s.allowed}\nBlocked: ${s.blocked}\nBlock rate: ${s.blockRate}%`
       );
       return;
     }
