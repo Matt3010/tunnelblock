@@ -32,9 +32,6 @@ type UpdateState = {
 };
 
 const updaterStateFile = process.env.UPDATER_STATE_FILE ?? "/updater-data/state.json";
-const legacyRedisVolume =
-  process.env.LEGACY_REDIS_VOLUME ?? "adblock-general-purpose-redis-data";
-
 function loadUpdateState(): UpdateState {
   try {
     const parsed = JSON.parse(fs.readFileSync(updaterStateFile, "utf8")) as Partial<UpdateState>;
@@ -210,35 +207,6 @@ async function serviceRuntimeState(service: string): Promise<string> {
   }
 }
 
-async function cleanupLegacyRedis(): Promise<void> {
-  if (running) {
-    setTimeout(() => void cleanupLegacyRedis(), 60_000);
-    return;
-  }
-
-  try {
-    await execFileAsync("docker", ["compose", "--profile", "legacy-bootstrap", "rm", "-sf", "redis"], {
-      cwd: repoDir,
-      env: process.env,
-    });
-  } catch (error) {
-    app.log.warn({ error }, "legacy-redis-container-cleanup-skipped");
-  }
-
-  try {
-    await execFileAsync("docker", ["volume", "rm", legacyRedisVolume], {
-      cwd: repoDir,
-      env: process.env,
-    });
-    app.log.info({ volume: legacyRedisVolume }, "legacy-redis-removed");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/no such volume/i.test(message)) {
-      app.log.warn({ error }, "legacy-redis-volume-cleanup-skipped");
-    }
-  }
-}
-
 async function refreshExternalBlocklists(): Promise<void> {
   if (!token) return;
 
@@ -315,7 +283,7 @@ if ! docker compose config --quiet; then
 fi
 
 echo "== Pre-flight: build all deployment images =="
-if ! docker compose build doh-proxy updater doh-a doh-b telegram-bot debug-api; then
+if ! docker compose build doh-proxy updater doh-a doh-b telegram-bot debug-collector; then
   echo "Image build failed; restoring previous checkout."
   git reset --hard "$PREVIOUS_SHA"
   exit 11
@@ -416,7 +384,7 @@ docker compose up -d --no-deps doh-b
 wait_ready doh-b || rollback_resolvers doh-b 22
 
 docker compose up -d --no-deps --force-recreate doh-proxy
-docker compose up -d --no-deps --force-recreate telegram-bot debug-api
+docker compose up -d --no-deps --force-recreate telegram-bot debug-collector
 
 echo "== Scheduling verified updater self-replacement =="
 docker run --rm -d \
@@ -561,7 +529,6 @@ await app.listen({
 });
 
 setTimeout(() => void checkForUpdates(), 10_000);
-setTimeout(() => void cleanupLegacyRedis(), 30_000);
 setTimeout(() => void refreshExternalBlocklists(), 60_000);
 setInterval(() => void checkForUpdates(), pollIntervalSec * 1000);
 setInterval(
