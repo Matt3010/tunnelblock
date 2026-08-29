@@ -68,6 +68,9 @@ services:
       GIT_BRANCH: master
       REPO_DIR: /workspace
       COMPOSE_PROJECT_NAME: adblock-general-purpose
+      AUTO_UPDATE_INTERVAL_SEC: 300
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
     volumes:
       - ./:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
