@@ -6,6 +6,15 @@ import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import { parseQuestion, buildBlockedResponse } from "./dns.js";
 import { RuleEngine } from "./rules.js";
+import {
+  getDomains,
+  getStats,
+  getTop,
+  makeDomainKey,
+  recordQuery,
+  resolveDomainKey,
+  statsReady,
+} from "./stats.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
@@ -33,26 +42,6 @@ const publicDoHUrl =
 const adminToken = process.env.ADMIN_API_TOKEN;
 
 const startedAt = Date.now();
-let queryCount = 0;
-let blockedCount = 0;
-let allowedCount = 0;
-const blockedDomains = new Map<string, number>();
-const allowedDomains = new Map<string, number>();
-
-function bump(map: Map<string, number>, domain: string) {
-  map.set(domain, (map.get(domain) ?? 0) + 1);
-}
-
-function blockRate(): number {
-  return queryCount === 0 ? 0 : Number(((blockedCount / queryCount) * 100).toFixed(2));
-}
-
-function top(map: Map<string, number>, limit = 10) {
-  return [...map.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([domain, count]) => ({ domain, count }));
-}
 
 function activeRules(file: string): Set<string> {
   return new Set(
@@ -60,10 +49,6 @@ function activeRules(file: string): Set<string> {
       .map(line => line.trim().toLowerCase())
       .filter(line => line && !line.startsWith("#")),
   );
-}
-
-function domainKey(domain: string): string {
-  return crypto.createHash("sha256").update(domain).digest("hex").slice(0, 16);
 }
 
 function domainState(domain: string): "allow" | "block" | "default" {
@@ -75,40 +60,27 @@ function domainState(domain: string): "allow" | "block" | "default" {
   return "default";
 }
 
-function domainItems(limit = 8, offset = 0) {
-  const counts = new Map<string, number>();
-
-  for (const [domain, count] of allowedDomains) {
-    counts.set(domain, (counts.get(domain) ?? 0) + count);
-  }
-  for (const [domain, count] of blockedDomains) {
-    counts.set(domain, (counts.get(domain) ?? 0) + count);
-  }
-
-  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-
+async function domainItems(limit = 8, offset = 0) {
+  const result = await getDomains(limit, offset);
   return {
-    total: sorted.length,
-    items: sorted
-      .slice(offset, offset + limit)
-      .map(([domain, count]) => ({
-        key: domainKey(domain),
-        domain,
-        count,
-        state: domainState(domain),
-      })),
+    total: result.total,
+    items: result.items.map(item => ({
+      ...item,
+      state: domainState(item.domain),
+    })),
   };
 }
 
-function resolveObservedDomain(key: string): string | undefined {
-  const domains = new Set<string>([
-    ...allowedDomains.keys(),
-    ...blockedDomains.keys(),
+async function resolveObservedDomain(key: string): Promise<string | undefined> {
+  const observed = await resolveDomainKey(key);
+  if (observed) return observed;
+
+  const ruleDomains = new Set<string>([
     ...activeRules(allowPath),
     ...activeRules(blockPath),
   ]);
 
-  return [...domains].find(domain => domainKey(domain) === key);
+  return [...ruleDomains].find(domain => makeDomainKey(domain) === key);
 }
 
 function requireAdmin(request: any, reply: any): boolean {
@@ -250,14 +222,7 @@ async function resolveDns(packet: Buffer): Promise<Buffer> {
   const question = parseQuestion(packet);
   const decision = rules.decide(question.qname);
 
-  queryCount++;
-  if (decision === "block") {
-    blockedCount++;
-    bump(blockedDomains, question.qname);
-  } else {
-    allowedCount++;
-    bump(allowedDomains, question.qname);
-  }
+  void recordQuery(question.qname, decision);
 
   app.log.info({
     qname: question.qname,
@@ -270,7 +235,10 @@ async function resolveDns(packet: Buffer): Promise<Buffer> {
   return forwardUdp(packet);
 }
 
-app.get("/health", async () => ({ ok: true }));
+app.get("/health", async () => ({
+  ok: true,
+  statsStorage: statsReady() ? "redis" : "degraded",
+}));
 
 app.get("/install", async (_request, reply) => {
   return reply
@@ -282,24 +250,33 @@ app.get("/install", async (_request, reply) => {
 
 app.get("/admin/status", async (request, reply) => {
   if (!requireAdmin(request, reply)) return;
-  return {
-    ok: true,
-    uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
-    queries: queryCount,
-    allowed: allowedCount,
-    blocked: blockedCount,
-    blockRate: blockRate(),
-  };
+
+  try {
+    const stats = await getStats();
+    return {
+      ok: true,
+      uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+      statsStorage: "redis",
+      ...stats,
+    };
+  } catch (error) {
+    return reply.code(503).send({
+      error: error instanceof Error ? error.message : String(error),
+      statsStorage: "unavailable",
+    });
+  }
 });
 
 app.get("/admin/stats", async (request, reply) => {
   if (!requireAdmin(request, reply)) return;
-  return {
-    queries: queryCount,
-    allowed: allowedCount,
-    blocked: blockedCount,
-    blockRate: blockRate(),
-  };
+
+  try {
+    return await getStats();
+  } catch (error) {
+    return reply.code(503).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 app.get("/admin/top", async (request, reply) => {
@@ -308,7 +285,14 @@ app.get("/admin/top", async (request, reply) => {
   if (decision !== "allow" && decision !== "block") {
     return reply.code(400).send({ error: "decision must be allow or block" });
   }
-  return { items: top(decision === "block" ? blockedDomains : allowedDomains) };
+
+  try {
+    return { items: await getTop(decision) };
+  } catch (error) {
+    return reply.code(503).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 app.get("/admin/domains", async (request, reply) => {
@@ -318,7 +302,13 @@ app.get("/admin/domains", async (request, reply) => {
   const requestedOffset = Number(query.offset ?? 0);
   const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 20) : 8;
   const offset = Number.isFinite(requestedOffset) ? Math.max(Math.floor(requestedOffset), 0) : 0;
-  return domainItems(limit, offset);
+  try {
+    return await domainItems(limit, offset);
+  } catch (error) {
+    return reply.code(503).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 app.post("/admin/reload", async (request, reply) => {
@@ -334,7 +324,7 @@ app.post("/admin/rules/by-key", async (request, reply) => {
     const body = request.body as { action?: string; key?: string };
     const action = body?.action;
     const key = body?.key ?? "";
-    const domain = resolveObservedDomain(key);
+    const domain = await resolveObservedDomain(key);
 
     if (!domain) return reply.code(404).send({ error: "domain not found" });
 
