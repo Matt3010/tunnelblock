@@ -38,7 +38,7 @@ bootstrap_failure() {
   CODE="$1"
   export TARGET_SHA="${TARGET_SHA:-}"
   printf '%s\n' "Bootstrap failed with exit code $CODE" >>"$LOG_FILE" 2>/dev/null || true
-  /update-state.mjs failed 2>/dev/null || true
+  node /update-state.mjs failed 2>/dev/null || true
   notify "❌ Aggiornamento AdBlock fallito durante il bootstrap. Exit code: $CODE"
 }
 
@@ -72,13 +72,13 @@ export PREVIOUS_SHA TARGET_SHA
 
 git -c safe.directory=/workspace reset --hard "origin/$BRANCH" >>"$LOG_FILE" 2>&1 || exit 6
 
-if [ ! -x /workspace/ops/deploy.sh ]; then
-  echo "Fresh checkout does not contain executable ops/deploy.sh" >>"$LOG_FILE"
+if [ ! -f /workspace/ops/deploy.sh ]; then
+  echo "Fresh checkout does not contain ops/deploy.sh" >>"$LOG_FILE"
   exit 7
 fi
 
 set +e
-/workspace/ops/deploy.sh
+sh /workspace/ops/deploy.sh
 CODE="$?"
 set -e
 HANDLED=1
