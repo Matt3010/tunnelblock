@@ -13,7 +13,7 @@ x-doh-common: &doh-common
     PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
     ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
   volumes:
-    - rules-data:/rules
+    - ${HOST_REPO_DIR:-.}/data/rules:/rules
   healthcheck:
     test:
       - CMD
@@ -107,7 +107,5 @@ services:
       - telegram-data:/telegram-data
 
 volumes:
-  rules-data:
-    name: adblock-general-purpose-rules-data
   telegram-data:
     name: adblock-general-purpose-telegram-data
