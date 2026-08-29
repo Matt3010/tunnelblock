@@ -10,6 +10,7 @@ const githubToken = process.env.GITHUB_TOKEN;
 const repoDir = process.env.REPO_DIR ?? "/workspace";
 const branch = process.env.GIT_BRANCH ?? "master";
 const pollIntervalSec = Number(process.env.AUTO_UPDATE_INTERVAL_SEC ?? 300);
+const listRefreshIntervalHours = Number(process.env.LIST_REFRESH_INTERVAL_HOURS ?? 24);
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const telegramUserIds = (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
   .split(",")
@@ -102,6 +103,30 @@ async function localSha(): Promise<string> {
     cwd: repoDir,
   });
   return stdout.trim();
+}
+
+async function refreshExternalBlocklists(): Promise<void> {
+  if (!token) return;
+
+  try {
+    const response = await fetch("http://doh-proxy:8053/admin/lists/refresh", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: "{}",
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`Blocklist refresh failed: HTTP ${response.status} ${text}`);
+    }
+
+    app.log.info({ result: text }, "external-blocklists-refreshed");
+  } catch (error) {
+    app.log.error({ error }, "external-blocklist-refresh-failed");
+  }
 }
 
 async function ensureRuntimeDependencies(): Promise<void> {
@@ -327,4 +352,9 @@ await app.listen({
 
 setTimeout(() => void ensureRuntimeDependencies(), 2_000);
 setTimeout(() => void checkForUpdates(), 10_000);
+setTimeout(() => void refreshExternalBlocklists(), 60_000);
 setInterval(() => void checkForUpdates(), pollIntervalSec * 1000);
+setInterval(
+  () => void refreshExternalBlocklists(),
+  listRefreshIntervalHours * 60 * 60 * 1000,
+);
