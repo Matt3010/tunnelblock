@@ -1,3 +1,28 @@
+x-doh-common: &doh-common
+  build:
+    context: .
+    dockerfile: dns/Dockerfile
+  restart: unless-stopped
+  environment:
+    HOST: 0.0.0.0
+    PORT: 8053
+    UPSTREAM_DNS_HOST: 1.1.1.1
+    UPSTREAM_DNS_PORT: 53
+    PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
+    ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+  volumes:
+    - ./rules:/rules
+  healthcheck:
+    test:
+      - CMD
+      - node
+      - -e
+      - "fetch('http://127.0.0.1:8053/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+    interval: 5s
+    timeout: 2s
+    retries: 3
+    start_period: 5s
+
 services:
   debug-collector:
     build:
@@ -10,20 +35,22 @@ services:
     ports:
       - "8787:8787"
 
-  doh:
-    build:
-      context: .
-      dockerfile: dns/Dockerfile
+  doh-a:
+    <<: *doh-common
+
+  doh-b:
+    <<: *doh-common
+
+  doh-proxy:
+    image: caddy:2-alpine
     restart: unless-stopped
-    environment:
-      HOST: 0.0.0.0
-      PORT: 8053
-      UPSTREAM_DNS_HOST: 1.1.1.1
-      UPSTREAM_DNS_PORT: 53
-      PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
-      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    depends_on:
+      doh-a:
+        condition: service_healthy
+      doh-b:
+        condition: service_healthy
     volumes:
-      - ./rules:/rules
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
       - "8053:8053"
 
@@ -33,9 +60,10 @@ services:
       dockerfile: telegram/Dockerfile
     restart: unless-stopped
     depends_on:
-      - doh
+      doh-proxy:
+        condition: service_started
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
-      ADMIN_API_BASE: http://doh:8053
+      ADMIN_API_BASE: http://doh-proxy:8053
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
