@@ -13,6 +13,12 @@ const app = Fastify({
   bodyLimit: 1024 * 1024,
 });
 
+app.addContentTypeParser(
+  "application/dns-message",
+  { parseAs: "buffer" },
+  (_request, body, done) => done(null, body),
+);
+
 const rules = RuleEngine.fromFiles(
   path.join(root, "rules/block.txt"),
   path.join(root, "rules/allow.txt"),
@@ -53,6 +59,7 @@ async function resolveDns(packet: Buffer): Promise<Buffer> {
     qname: question.qname,
     qtype: question.qtype,
     decision,
+    bytes: packet.length,
   }, "dns-query");
 
   if (decision === "block") {
@@ -73,26 +80,31 @@ app.route({
     if (request.method === "GET") {
       const dns = (request.query as { dns?: string }).dns;
       if (!dns) return reply.code(400).send("missing dns query parameter");
-      packet = Buffer.from(
-        dns.replace(/-/g, "+").replace(/_/g, "/"),
-        "base64",
-      );
+
+      const normalized = dns
+        .replace(/-/g, "+")
+        .replace(/_/g, "/")
+        .padEnd(Math.ceil(dns.length / 4) * 4, "=");
+
+      packet = Buffer.from(normalized, "base64");
     } else {
-      const body = request.body;
-      if (Buffer.isBuffer(body)) {
-        packet = body;
-      } else if (typeof body === "string") {
-        packet = Buffer.from(body, "binary");
-      } else {
-        return reply.code(400).send("invalid dns payload");
+      if (!Buffer.isBuffer(request.body)) {
+        return reply.code(415).send("expected application/dns-message");
       }
+      packet = request.body;
     }
 
-    const result = await resolveDns(packet);
+    try {
+      const result = await resolveDns(packet);
 
-    return reply
-      .header("content-type", "application/dns-message")
-      .send(result);
+      return reply
+        .header("content-type", "application/dns-message")
+        .header("cache-control", "no-store")
+        .send(result);
+    } catch (error) {
+      request.log.error({ error }, "dns-resolution-failed");
+      return reply.code(502).send("dns resolution failed");
+    }
   }
 });
 
