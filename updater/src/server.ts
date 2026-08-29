@@ -262,11 +262,24 @@ git -c http.extraHeader="Authorization: Basic $AUTH" -c credential.helper= fetch
 PREVIOUS_SHA="$(git rev-parse HEAD)"
 git reset --hard "origin/${branch}"
 
-HOST_REPO_DIR="$(docker inspect "$(hostname)" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}')"
-if [ -z "$HOST_REPO_DIR" ] || [ ! -d "$HOST_REPO_DIR" ]; then
+UPDATER_CONTAINER_ID="$(docker ps -q \
+  --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-adblock-general-purpose}" \
+  --filter "label=com.docker.compose.service=updater" \
+  | head -n 1)"
+
+if [ -z "$UPDATER_CONTAINER_ID" ]; then
+  echo "Unable to locate running updater container"
+  exit 3
+fi
+
+HOST_REPO_DIR="$(docker inspect "$UPDATER_CONTAINER_ID" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}')"
+if [ -z "$HOST_REPO_DIR" ]; then
   echo "Unable to resolve host repository path for /workspace"
   exit 3
 fi
+
+# HOST_REPO_DIR is a Docker-host path. It is intentionally not required to
+# exist inside this container; Docker Compose passes it to the host daemon.
 export HOST_REPO_DIR
 echo "Using host repository path: $HOST_REPO_DIR"
 
