@@ -154,9 +154,9 @@ if ! docker compose config --quiet; then
   exit 10
 fi
 
-echo "== Pre-flight: Caddy configuration and host bind =="
-if ! docker run --rm   -v "$HOST_REPO_DIR/proxy:/candidate-proxy:ro"   caddy:2-alpine   caddy validate --config /candidate-proxy/Caddyfile; then
-  echo "Caddy/bind validation failed; restoring previous checkout."
+echo "== Pre-flight: build and validate proxy image =="
+if ! docker compose build doh-proxy; then
+  echo "Proxy build/validation failed; restoring previous checkout."
   git reset --hard "$PREVIOUS_SHA"
   exit 11
 fi
@@ -179,7 +179,7 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-docker compose up -d --no-deps doh-proxy
+docker compose up -d --no-deps --force-recreate doh-proxy
 docker compose up -d --no-deps telegram-bot debug-collector
 
 echo "== Scheduling updater self-replacement =="
