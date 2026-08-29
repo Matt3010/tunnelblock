@@ -11,9 +11,9 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
 
 db.exec(`
+  PRAGMA busy_timeout = 5000;
   PRAGMA journal_mode = WAL;
   PRAGMA synchronous = NORMAL;
-  PRAGMA busy_timeout = 5000;
 
   CREATE TABLE IF NOT EXISTS stats (
     id INTEGER PRIMARY KEY CHECK (id = 1),
