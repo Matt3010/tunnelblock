@@ -8,6 +8,8 @@ COPY updater/package*.json ./
 RUN npm install
 
 COPY updater/src ./src
+RUN npm run typecheck
+
 COPY updater/replace-self.sh /replace-self.sh
 RUN chmod +x /replace-self.sh
 
