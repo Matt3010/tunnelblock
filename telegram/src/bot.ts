@@ -221,18 +221,30 @@ function domainDetailView(item: any, page: number) {
   ];
 
   if (item.matchedRule) {
-    lines.push(`Regola: ${item.matchedRule}`);
+    lines.push(`Regola effettiva: ${item.matchedRule}`);
   }
 
-  if (item.blocklist?.url) {
-    const listName = shortListName(item.blocklist.url);
-    if (item.state === "list") {
-      lines.push(`Lista: 📚 ${listName}`);
-    } else {
-      lines.push(`Presente anche in: 📚 ${listName}`);
+  const matchingLists = Array.isArray(item.blocklists)
+    ? item.blocklists
+    : item.blocklist
+      ? [item.blocklist]
+      : [];
+
+  if (matchingLists.length) {
+    lines.push(
+      item.state === "list"
+        ? `Blocklist corrispondenti: ${matchingLists.length}`
+        : `Presente anche in ${matchingLists.length} blocklist:`,
+    );
+
+    for (const match of matchingLists.slice(0, 5)) {
+      lines.push(
+        `• 📚 ${shortListName(match.url)} → ${match.matchedRule ?? item.domain}`,
+      );
     }
-    if (item.blocklist.matchedRule) {
-      lines.push(`Match lista: ${item.blocklist.matchedRule}`);
+
+    if (matchingLists.length > 5) {
+      lines.push(`• … altre ${matchingLists.length - 5}`);
     }
   }
 
@@ -296,7 +308,7 @@ async function getLists() {
 function listsView(data: any) {
   const items = data.items ?? [];
   const rows = items.map((item: any) => ([{
-    text: `${item.enabled ? "✅" : "⏸"} ${shortListName(item.url)} · ${item.domainCount}`,
+    text: `${item.lastError ? "⚠️" : item.enabled ? "✅" : "⏸"} ${shortListName(item.url)} · ${item.cachedDomainCount ?? item.domainCount}`,
     callback_data: `lists:d:${item.id}`,
   }]));
 
@@ -305,13 +317,18 @@ function listsView(data: any) {
     { text: "🔄 Aggiorna tutte", callback_data: "lists:refresh" },
   ]);
 
+  const activeCount = Number(data.activeCount ?? items.filter((item: any) => item.enabled).length);
+  const duplicateEntries = Number(data.duplicateEntries ?? 0);
+  const unhealthyCount = Number(data.unhealthyCount ?? items.filter((item: any) => item.lastError).length);
+
   return {
     text: [
       "📚 Blocklist esterne",
-      `${items.length} liste · ${data.combinedDomainCount ?? 0} domini attivi`,
+      `${activeCount}/${items.length} attive · ${data.combinedDomainCount ?? 0} domini unici`,
+      `Overlap: ${duplicateEntries} voci duplicate${unhealthyCount ? ` · ⚠️ ${unhealthyCount} con errore` : ""}`,
       "",
       items.length
-        ? "Tocca una lista per gestirla."
+        ? "Tocca una lista per copertura, overlap e stato."
         : "Nessuna lista configurata. Il blocco resta solo manuale.",
     ].join("\n"),
     reply_markup: { inline_keyboard: rows },
@@ -319,14 +336,25 @@ function listsView(data: any) {
 }
 
 function listDetailView(item: any) {
+  const coverage = item.enabled
+    ? [
+        `Domini cache: ${item.cachedDomainCount ?? item.domainCount}`,
+        `Unici a questa lista: ${item.uniqueDomainCount ?? 0}`,
+        `Sovrapposti ad altre liste: ${item.overlapDomainCount ?? 0}`,
+      ]
+    : [
+        `Domini cache: ${item.cachedDomainCount ?? item.domainCount}`,
+        "Copertura attiva: disabilitata",
+      ];
+
   return {
     text: [
-      `${item.enabled ? "✅ Attiva" : "⏸ Disabilitata"}`,
+      `${item.lastError ? "⚠️" : item.enabled ? "✅" : "⏸"} ${item.enabled ? "Attiva" : "Disabilitata"}`,
       shortListName(item.url),
       "",
       item.url,
       "",
-      `Domini: ${item.domainCount}`,
+      ...coverage,
       `Ultimo aggiornamento: ${formatListDate(item.updatedAt)}`,
       item.lastError ? `Ultimo errore: ${item.lastError}` : "Stato: OK",
     ].join("\n"),
@@ -359,6 +387,20 @@ async function editListsHome(chatId: number, messageId: number) {
 async function getListById(id: string) {
   const data = await getLists();
   return (data.items ?? []).find((item: any) => item.id === id);
+}
+
+function topSourceLabel(item: any): string {
+  if (item.source === "manual-block") return "🚫 manuale";
+  if (item.source === "manual-allow") return "✅ manuale";
+
+  if (item.source === "external-block") {
+    const matches = Array.isArray(item.blocklists) ? item.blocklists : [];
+    if (!matches.length) return "📚 blocklist";
+    const suffix = matches.length > 1 ? ` +${matches.length - 1}` : "";
+    return `📚 ${shortListName(matches[0].url)}${suffix}`;
+  }
+
+  return "⚪ default";
 }
 
 function helpText(): string {
@@ -643,7 +685,7 @@ bot.on("message", async msg => {
     if (text === "/status") {
       const status = await api("/admin/status");
       await sendTrackedMessage(chatId,
-        `DoH: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nBlocklist attive: ${status.blocklists ?? 0}\nDomini esterni: ${status.externalBlockedDomains ?? 0}`
+        `DoH: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nBlocklist attive: ${status.blocklists ?? 0}\nDomini esterni unici: ${status.externalBlockedDomains ?? 0}\nDuplicati tra liste: ${status.blocklistDuplicateEntries ?? 0}\nListe in errore: ${status.blocklistErrors ?? 0}`
       );
       return;
     }
@@ -721,14 +763,21 @@ bot.on("message", async msg => {
 
     if (text === "/topblocked") {
       const s = await api("/admin/top?decision=block");
-      const lines = (s.items ?? []).map((x: any, i: number) => `${i+1}. ${x.domain} — ${x.count}`);
+      const lines = (s.items ?? []).map((x: any, i: number) => {
+        const rule = x.matchedRule && x.matchedRule !== x.domain
+          ? ` · ↳ ${x.matchedRule}`
+          : "";
+        return `${i + 1}. ${x.domain} — ${x.count} · ${topSourceLabel(x)}${rule}`;
+      });
       await sendTrackedMessage(chatId, lines.length ? lines.join("\n") : "No blocked domains yet.");
       return;
     }
 
     if (text === "/topallowed") {
       const s = await api("/admin/top?decision=allow");
-      const lines = (s.items ?? []).map((x: any, i: number) => `${i+1}. ${x.domain} — ${x.count}`);
+      const lines = (s.items ?? []).map((x: any, i: number) =>
+        `${i + 1}. ${x.domain} — ${x.count} · ${topSourceLabel(x)}`
+      );
       await sendTrackedMessage(chatId, lines.length ? lines.join("\n") : "No allowed domains yet.");
       return;
     }
