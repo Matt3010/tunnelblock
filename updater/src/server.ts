@@ -163,7 +163,7 @@ fi
 
 echo "== Pre-flight passed =="
 
-docker compose build doh-a doh-b telegram-bot debug-collector
+docker compose build updater doh-a doh-b telegram-bot debug-collector
 
 docker compose up -d --no-deps doh-a
 for i in $(seq 1 30); do
@@ -181,6 +181,9 @@ done
 
 docker compose up -d --no-deps doh-proxy
 docker compose up -d --no-deps telegram-bot debug-collector
+
+echo "== Scheduling updater self-replacement =="
+docker run --rm -d   -e HOST_REPO_DIR="$HOST_REPO_DIR"   -v /var/run/docker.sock:/var/run/docker.sock   -v "$HOST_REPO_DIR:/workspace"   -w /workspace   adblock-general-purpose-updater:latest   sh -lc 'sleep 5; docker compose up -d --no-deps updater' >/dev/null
 `;
 
   const child = spawn("/bin/sh", ["-c", script], {
