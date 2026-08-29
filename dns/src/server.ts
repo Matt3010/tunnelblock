@@ -56,13 +56,29 @@ function activeRules(file: string): Set<string> {
   );
 }
 
-function domainState(domain: string): "allow" | "block" | "list" | "default" {
-  const detail = rules.decideDetailed(domain);
+function describeDomain(domain: string) {
+  const detail = rules.explain(domain);
+  const blocklistMatch = blocklists.findMatch(domain);
 
-  if (detail.source === "manual-allow") return "allow";
-  if (detail.source === "manual-block") return "block";
-  if (detail.source === "external-block") return "list";
-  return "default";
+  const state: "allow" | "block" | "list" | "default" =
+    detail.source === "manual-allow" ? "allow" :
+    detail.source === "manual-block" ? "block" :
+    detail.source === "external-block" ? "list" :
+    "default";
+
+  return {
+    state,
+    decision: detail.decision,
+    source: detail.source,
+    matchedRule: detail.matchedRule,
+    blocklist: blocklistMatch
+      ? {
+          id: blocklistMatch.source.id,
+          url: blocklistMatch.source.url,
+          matchedRule: blocklistMatch.matchedRule,
+        }
+      : null,
+  };
 }
 
 async function domainItems(limit = 8, offset = 0) {
@@ -71,7 +87,7 @@ async function domainItems(limit = 8, offset = 0) {
     total: result.total,
     items: result.items.map(item => ({
       ...item,
-      state: domainState(item.domain),
+      ...describeDomain(item.domain),
     })),
   };
 }
@@ -225,7 +241,7 @@ async function forwardUdp(packet: Buffer): Promise<Buffer> {
 
 async function resolveDns(packet: Buffer): Promise<Buffer> {
   const question = parseQuestion(packet);
-  const detail = rules.decideDetailed(question.qname);
+  const detail = rules.explain(question.qname);
   const decision = detail.decision;
 
   void recordQuery(question.qname, decision);
@@ -235,6 +251,7 @@ async function resolveDns(packet: Buffer): Promise<Buffer> {
     qtype: question.qtype,
     decision,
     decisionSource: detail.source,
+    matchedRule: detail.matchedRule,
     bytes: packet.length,
   }, "dns-query");
 
@@ -279,7 +296,8 @@ app.get("/admin/status", async (request, reply) => {
       ok: true,
       uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
       statsStorage: "sqlite",
-      blocklists: blocklists.list().length,
+      blocklists: blocklists.activeCount(),
+      configuredBlocklists: blocklists.list().length,
       externalBlockedDomains: blocklists.combinedDomainCount(),
       ...stats,
     };
@@ -447,7 +465,7 @@ app.post("/admin/rules/by-key", async (request, reply) => {
     }
 
     reloadRules();
-    return { ok: true, action, domain, state: action };
+    return { ok: true, action, domain, ...describeDomain(domain) };
   } catch (error) {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : String(error),
