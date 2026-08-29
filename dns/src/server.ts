@@ -15,6 +15,7 @@ import {
   recordQuery,
   resolveDomainKey,
   statsReady,
+  ensureStatsReady,
 } from "./stats.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -245,6 +246,21 @@ app.get("/health", async () => ({
   ok: true,
   statsStorage: statsReady() ? "redis" : "degraded",
 }));
+
+app.get("/ready", async (_request, reply) => {
+  const ready = await ensureStatsReady(1500);
+  if (!ready) {
+    return reply.code(503).send({
+      ok: false,
+      statsStorage: "unavailable",
+    });
+  }
+
+  return {
+    ok: true,
+    statsStorage: "redis",
+  };
+});
 
 app.get("/install", async (_request, reply) => {
   return reply
