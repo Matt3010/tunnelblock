@@ -69,6 +69,7 @@ wait_service() {
 }
 
 verify_updater_revision() {
+  EXPECTED_SHA="$1"
   CID="$(docker compose ps -q updater 2>/dev/null || true)"
   [ -n "$CID" ] || return 1
 
@@ -83,10 +84,11 @@ verify_updater_revision() {
         process.exit(status.runtimeBuildSha === expected ? 0 : 3);
       })
       .catch(() => process.exit(4));
-  ' "$TARGET_SHA"
+  ' "$EXPECTED_SHA"
 }
 
 verify_stack() {
+  EXPECTED_SHA="$1"
   wait_service doh-a healthy || return 1
   wait_service doh-b healthy || return 1
   wait_service updater healthy || return 1
@@ -94,13 +96,13 @@ verify_stack() {
   wait_service telegram-bot running || return 1
 
   for i in $(seq 1 30); do
-    if verify_updater_revision; then
+    if verify_updater_revision "$EXPECTED_SHA"; then
       return 0
     fi
     sleep 1
   done
 
-  log "ERROR: updater runtimeBuildSha does not match target $TARGET_SHA"
+  log "ERROR: updater runtimeBuildSha does not match expected $EXPECTED_SHA"
   docker compose logs --no-color --tail=120 updater >>"$LOG_FILE" 2>&1 || true
   return 1
 }
@@ -128,7 +130,7 @@ deploy_target() (
   docker compose up -d --force-recreate --remove-orphans >>"$LOG_FILE" 2>&1
 
   log "== Verify stack =="
-  verify_stack
+  verify_stack "$TARGET_SHA"
 )
 
 rollback_previous() (
@@ -147,6 +149,7 @@ rollback_previous() (
   wait_service updater healthy
   wait_service doh-proxy running
   wait_service telegram-bot running
+  verify_updater_revision "$PREVIOUS_SHA"
 )
 
 mkdir -p "$(dirname "$STATE_FILE")"
