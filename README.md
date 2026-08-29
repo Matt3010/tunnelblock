@@ -1,71 +1,79 @@
 # adblock-general-purpose
 
-Experimental general-purpose iOS network ad blocker.
+Experimental app-less iOS ad blocker using DNS-over-HTTPS.
+
+## Primary architecture
+
+```text
+iPhone
+  |
+  | managed DoH profile
+  v
+https://adblock.scanferlamatteo.work/dns-query
+  |
+  | Cloudflare Tunnel
+  v
+Raspberry Pi
+  |
+  +--> DoH resolver / rule engine
+  +--> debug collector
+  +--> upstream DNS
+```
+
+No iOS app, no Xcode sideloading, no VPS and no inbound router ports are required.
 
 ## Current MVP
 
-The project currently contains:
+- DoH endpoint at `/dns-query`
+- domain allow/block engine
+- DNS packet parser
+- blocked DNS response generation
+- upstream DNS forwarding
+- iOS `.mobileconfig` template
+- Raspberry Pi debug collector
+- Docker deployment
+- IKEv2 code retained only as an alternative experiment
 
-- domain rule engine with allow/block precedence
-- unit tests
-- iOS `NEPacketTunnelProvider` skeleton
-- optional Raspberry Pi debug collector
-- full available-payload debug events
-- Docker deployment for the collector
+## Raspberry deployment
 
-The current milestone intentionally does **not** perform TLS interception.
-
-## Repository layout
-
-```text
-ios/PacketTunnel/   iOS Network Extension skeleton
-server/             TypeScript filtering/debug services
-rules/              allow/block lists
-docs/               architecture, debug logger and roadmap
-docker-compose.yml  Raspberry Pi collector deployment
-```
-
-## Run tests
+Create a local `.env` containing the debug token, then:
 
 ```bash
-cd server
-npm install
-npm test
+docker compose up -d
 ```
 
-## Raspberry Pi debug collector
-
-Create a local `.env`:
-
-```bash
-DEBUG_TOKEN=replace-with-a-long-random-token
-```
-
-Then:
-
-```bash
-docker compose up -d --build
-```
-
-Health check:
+Services:
 
 ```text
-GET http://<raspberry-ip>:8787/health
+DoH resolver:      http://raspberry:8053/dns-query
+DoH health:        http://raspberry:8053/health
+Debug collector:   http://raspberry:8787/events
 ```
 
-Debug endpoint:
+Configure Cloudflare Tunnel so:
 
 ```text
-POST http://<raspberry-ip>:8787/events
-Authorization: Bearer <DEBUG_TOKEN>
+https://adblock.scanferlamatteo.work/dns-query -> http://localhost:8053/dns-query
+https://adblock.scanferlamatteo.work/health    -> http://localhost:8053/health
+https://adblock.scanferlamatteo.work/events    -> http://localhost:8787/events
 ```
 
-During this development phase, the collector stores/logs the **complete payload available to the capture layer**. UTF-8 data is sent as text and binary data is base64 encoded.
+## Generate iOS profile
 
-For HTTPS, application plaintext is still encrypted until/unless a later isolated TLS-inspection milestone is implemented.
+```bash
+node scripts/generate-doh-profile.mjs
+```
 
-## Next milestone
+This creates:
 
-M1 implements real DNS packet parsing/filtering inside the iOS tunnel and streams the observed DNS packets/events to the Raspberry Pi collector.
+```text
+profiles/adblock-doh.mobileconfig
+```
 
-See `docs/ROADMAP.md`.
+Install that profile on the iPhone.
+
+## Limitation
+
+DNS filtering can block many ad/tracker domains, but it cannot reliably distinguish YouTube ads from normal video traffic when both are served through shared Google infrastructure.
+
+The YouTube-specific work remains experimental.
