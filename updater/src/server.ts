@@ -182,6 +182,32 @@ async function localSha(): Promise<string> {
   return stdout.trim();
 }
 
+async function serviceRuntimeState(service: string): Promise<string> {
+  try {
+    const { stdout: idOutput } = await execFileAsync(
+      "docker",
+      ["compose", "ps", "-q", "--all", service],
+      { cwd: repoDir, env: process.env },
+    );
+    const containerId = idOutput.trim();
+    if (!containerId) return "missing";
+
+    const { stdout: stateOutput } = await execFileAsync(
+      "docker",
+      [
+        "inspect",
+        containerId,
+        "--format",
+        "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+      ],
+      { cwd: repoDir, env: process.env },
+    );
+    return stateOutput.trim() || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 async function cleanupLegacyRedis(): Promise<void> {
   if (running) return;
 
@@ -478,6 +504,13 @@ app.get("/status", async (request, reply) => {
   let currentSha: string | null = null;
   try { currentSha = await localSha(); } catch {}
 
+  const [dohA, dohB, proxy, telegram] = await Promise.all([
+    serviceRuntimeState("doh-a"),
+    serviceRuntimeState("doh-b"),
+    serviceRuntimeState("doh-proxy"),
+    serviceRuntimeState("telegram-bot"),
+  ]);
+
   return {
     running,
     autoUpdate: true,
@@ -485,6 +518,12 @@ app.get("/status", async (request, reply) => {
     pollIntervalSec,
     statePersistent: true,
     currentSha,
+    services: {
+      dohA,
+      dohB,
+      proxy,
+      telegram,
+    },
     lastSeenRemoteSha,
     failedRemoteSha,
     lastStartedAt,
