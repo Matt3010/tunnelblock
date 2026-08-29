@@ -132,6 +132,14 @@ git -c http.extraHeader="Authorization: Basic $AUTH" -c credential.helper= fetch
 
 git reset --hard "origin/${branch}"
 
+HOST_REPO_DIR="$(docker inspect "$(hostname)" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}')"
+if [ -z "$HOST_REPO_DIR" ] || [ ! -d "$HOST_REPO_DIR" ]; then
+  echo "Unable to resolve host repository path for /workspace"
+  exit 3
+fi
+export HOST_REPO_DIR
+echo "Using host repository path: $HOST_REPO_DIR"
+
 docker compose build doh-a doh-b telegram-bot debug-collector
 
 docker compose up -d --no-deps doh-a
