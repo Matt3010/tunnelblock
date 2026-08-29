@@ -94,6 +94,7 @@ await bot.setMyCommands([
   { command: "status", description: "Stato del resolver DoH" },
   { command: "stats", description: "Statistiche DNS" },
   { command: "domains", description: "Gestisci domini Allow / Block" },
+  { command: "lists", description: "Gestisci blocklist esterne" },
   { command: "topblocked", description: "Domini più bloccati" },
   { command: "topallowed", description: "Domini più richiesti" },
   { command: "profile", description: "Link profilo iPhone" },
@@ -151,7 +152,10 @@ async function updaterApi(path: string, init?: RequestInit) {
 const DOMAINS_PAGE_SIZE = 8;
 
 function stateIcon(state: string): string {
-  return state === "allow" ? "✅" : state === "block" ? "🚫" : "⚪";
+  if (state === "allow") return "✅";
+  if (state === "block") return "🚫";
+  if (state === "list") return "📚";
+  return "⚪";
 }
 
 async function getDomainsPage(page: number) {
@@ -230,12 +234,105 @@ async function findDomainOnPage(key: string, page: number) {
   };
 }
 
+
+const pendingListAdd = new Map<number, number>();
+
+function shortListName(urlValue: string): string {
+  try {
+    const url = new URL(urlValue);
+    const tail = url.pathname.split("/").filter(Boolean).pop();
+    const value = tail ? `${url.hostname}/${tail}` : url.hostname;
+    return value.length > 38 ? value.slice(0, 35) + "…" : value;
+  } catch {
+    return urlValue.slice(0, 38);
+  }
+}
+
+function formatListDate(value: string | null): string {
+  if (!value) return "mai";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("it-IT");
+}
+
+async function getLists() {
+  return api("/admin/lists");
+}
+
+function listsView(data: any) {
+  const items = data.items ?? [];
+  const rows = items.map((item: any) => ([{
+    text: `${item.enabled ? "✅" : "⏸"} ${shortListName(item.url)} · ${item.domainCount}`,
+    callback_data: `lists:d:${item.id}`,
+  }]));
+
+  rows.push([
+    { text: "➕ Aggiungi", callback_data: "lists:add" },
+    { text: "🔄 Aggiorna tutte", callback_data: "lists:refresh" },
+  ]);
+
+  return {
+    text: [
+      "📚 Blocklist esterne",
+      `${items.length} liste · ${data.combinedDomainCount ?? 0} domini attivi`,
+      "",
+      items.length
+        ? "Tocca una lista per gestirla."
+        : "Nessuna lista configurata. Il blocco resta solo manuale.",
+    ].join("\n"),
+    reply_markup: { inline_keyboard: rows },
+  };
+}
+
+function listDetailView(item: any) {
+  return {
+    text: [
+      `${item.enabled ? "✅ Attiva" : "⏸ Disabilitata"}`,
+      shortListName(item.url),
+      "",
+      item.url,
+      "",
+      `Domini: ${item.domainCount}`,
+      `Ultimo aggiornamento: ${formatListDate(item.updatedAt)}`,
+      item.lastError ? `Ultimo errore: ${item.lastError}` : "Stato: OK",
+    ].join("\n"),
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: item.enabled ? "⏸ Disabilita" : "▶️ Abilita",
+            callback_data: `lists:e:${item.id}:${item.enabled ? 0 : 1}`,
+          },
+          { text: "🔄 Aggiorna", callback_data: `lists:r:${item.id}` },
+        ],
+        [{ text: "🗑 Rimuovi", callback_data: `lists:c:${item.id}` }],
+        [{ text: "⬅️ Torna alle liste", callback_data: "lists:home" }],
+      ],
+    },
+  };
+}
+
+async function editListsHome(chatId: number, messageId: number) {
+  const data = await getLists();
+  const view = listsView(data);
+  await bot.editMessageText(view.text, {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: view.reply_markup,
+  });
+}
+
+async function getListById(id: string) {
+  const data = await getLists();
+  return (data.items ?? []).find((item: any) => item.id === id);
+}
+
 function helpText(): string {
   return [
     "AdBlock bot commands:",
     "/status",
     "/stats",
     "/domains",
+    "/lists",
     "/topblocked",
     "/topallowed",
     "/reload",
@@ -259,6 +356,136 @@ bot.on("callback_query", async query => {
   }
 
   try {
+    if (data === "lists:home") {
+      await editListsHome(chatId, messageId);
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === "lists:add") {
+      pendingListAdd.set(chatId, messageId);
+      await bot.editMessageText(
+        "➕ Aggiungi blocklist\n\nInviami ora l’URL HTTPS della lista.\nSono supportati domini semplici, file hosts e sintassi Adblock ||domain^.",
+        {
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "❌ Annulla", callback_data: "lists:canceladd" },
+            ]],
+          },
+        },
+      );
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === "lists:canceladd") {
+      pendingListAdd.delete(chatId);
+      await editListsHome(chatId, messageId);
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === "lists:refresh") {
+      await bot.answerCallbackQuery(query.id, { text: "Aggiornamento liste avviato…" });
+      const result = await api("/admin/lists/refresh", { method: "POST", body: "{}" });
+      await editListsHome(chatId, messageId);
+      if (result.failed) {
+        await bot.answerCallbackQuery(query.id, {
+          text: `Aggiornate: ${result.updated}, errori: ${result.failed}`,
+          show_alert: true,
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    const listDetailMatch = data.match(/^lists:d:([a-f0-9]{12})$/);
+    if (listDetailMatch) {
+      const item = await getListById(listDetailMatch[1]);
+      if (!item) {
+        await bot.answerCallbackQuery(query.id, { text: "Lista non trovata.", show_alert: true });
+        await editListsHome(chatId, messageId);
+        return;
+      }
+      const view = listDetailView(item);
+      await bot.editMessageText(view.text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: view.reply_markup,
+      });
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const listEnableMatch = data.match(/^lists:e:([a-f0-9]{12}):(0|1)$/);
+    if (listEnableMatch) {
+      const [, id, enabledRaw] = listEnableMatch;
+      const result = await api(`/admin/lists/${id}/enabled`, {
+        method: "POST",
+        body: JSON.stringify({ enabled: enabledRaw === "1" }),
+      });
+      const view = listDetailView(result.source);
+      await bot.editMessageText(view.text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: view.reply_markup,
+      });
+      await bot.answerCallbackQuery(query.id, {
+        text: result.source.enabled ? "Lista abilitata" : "Lista disabilitata",
+      });
+      return;
+    }
+
+    const listRefreshMatch = data.match(/^lists:r:([a-f0-9]{12})$/);
+    if (listRefreshMatch) {
+      await bot.answerCallbackQuery(query.id, { text: "Aggiornamento…" });
+      const result = await api(`/admin/lists/${listRefreshMatch[1]}/refresh`, {
+        method: "POST",
+        body: "{}",
+      });
+      const view = listDetailView(result.source);
+      await bot.editMessageText(view.text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: view.reply_markup,
+      });
+      return;
+    }
+
+    const listConfirmMatch = data.match(/^lists:c:([a-f0-9]{12})$/);
+    if (listConfirmMatch) {
+      const item = await getListById(listConfirmMatch[1]);
+      if (!item) {
+        await editListsHome(chatId, messageId);
+        await bot.answerCallbackQuery(query.id);
+        return;
+      }
+      await bot.editMessageText(
+        `🗑 Rimuovere questa blocklist?\n\n${shortListName(item.url)}\n${item.url}`,
+        {
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🗑 Sì, rimuovi", callback_data: `lists:x:${item.id}` }],
+              [{ text: "⬅️ Annulla", callback_data: `lists:d:${item.id}` }],
+            ],
+          },
+        },
+      );
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const listDeleteMatch = data.match(/^lists:x:([a-f0-9]{12})$/);
+    if (listDeleteMatch) {
+      await api(`/admin/lists/${listDeleteMatch[1]}`, { method: "DELETE" });
+      await editListsHome(chatId, messageId);
+      await bot.answerCallbackQuery(query.id, { text: "Lista rimossa" });
+      return;
+    }
+
     if (data === "domains:noop") {
       await bot.answerCallbackQuery(query.id);
       return;
@@ -346,6 +573,34 @@ bot.on("message", async msg => {
   }
 
   try {
+    const pendingMessageId = pendingListAdd.get(chatId);
+    if (pendingMessageId !== undefined) {
+      if (text.startsWith("/")) {
+        pendingListAdd.delete(chatId);
+      } else {
+        try {
+          const result = await api("/admin/lists", {
+            method: "POST",
+            body: JSON.stringify({ url: text }),
+          });
+          pendingListAdd.delete(chatId);
+
+          try {
+            await bot.deleteMessage(chatId, msg.message_id);
+          } catch {}
+
+          await editListsHome(chatId, pendingMessageId);
+           return;
+        } catch (error) {
+          await sendTrackedMessage(
+            chatId,
+            `Impossibile aggiungere la lista: ${error instanceof Error ? error.message : String(error)}\n\nInvia un altro URL HTTPS oppure usa /lists per annullare.`,
+          );
+          return;
+        }
+      }
+    }
+
     if (text === "/start" || text === "/help") {
       await sendTrackedMessage(chatId, helpText());
       return;
@@ -376,6 +631,16 @@ bot.on("message", async msg => {
       }
 
       const view = domainsListView(data);
+      await sendTrackedMessage(chatId, view.text, {
+        reply_markup: view.reply_markup,
+      });
+      return;
+    }
+
+    if (text === "/lists") {
+      pendingListAdd.delete(chatId);
+      const data = await getLists();
+      const view = listsView(data);
       await sendTrackedMessage(chatId, view.text, {
         reply_markup: view.reply_markup,
       });
