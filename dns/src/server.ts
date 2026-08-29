@@ -58,7 +58,8 @@ function activeRules(file: string): Set<string> {
 
 function describeDomain(domain: string) {
   const detail = rules.explain(domain);
-  const blocklistMatch = blocklists.findMatch(domain);
+  const blocklistMatches = blocklists.findMatches(domain);
+  const primaryBlocklist = blocklistMatches[0] ?? null;
 
   const state: "allow" | "block" | "list" | "default" =
     detail.source === "manual-allow" ? "allow" :
@@ -71,13 +72,18 @@ function describeDomain(domain: string) {
     decision: detail.decision,
     source: detail.source,
     matchedRule: detail.matchedRule,
-    blocklist: blocklistMatch
+    blocklist: primaryBlocklist
       ? {
-          id: blocklistMatch.source.id,
-          url: blocklistMatch.source.url,
-          matchedRule: blocklistMatch.matchedRule,
+          id: primaryBlocklist.source.id,
+          url: primaryBlocklist.source.url,
+          matchedRule: primaryBlocklist.matchedRule,
         }
       : null,
+    blocklists: blocklistMatches.map(match => ({
+      id: match.source.id,
+      url: match.source.url,
+      matchedRule: match.matchedRule,
+    })),
   };
 }
 
@@ -317,7 +323,13 @@ app.get("/admin/top", async (request, reply) => {
   }
 
   try {
-    return { items: await getTop(decision) };
+    const items = await getTop(decision);
+    return {
+      items: items.map(item => ({
+        ...item,
+        ...describeDomain(item.domain),
+      })),
+    };
   } catch (error) {
     return reply.code(503).send({
       error: error instanceof Error ? error.message : String(error),
@@ -343,10 +355,7 @@ app.get("/admin/domains", async (request, reply) => {
 
 app.get("/admin/lists", async (request, reply) => {
   if (!requireAdmin(request, reply)) return;
-  return {
-    items: blocklists.list(),
-    combinedDomainCount: blocklists.combinedDomainCount(),
-  };
+  return blocklists.diagnostics();
 });
 
 app.post("/admin/lists", async (request, reply) => {
