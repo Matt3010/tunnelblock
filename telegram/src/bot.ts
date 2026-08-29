@@ -147,6 +147,89 @@ async function updaterApi(path: string, init?: RequestInit) {
   return requestJson(updaterBase, path, init);
 }
 
+
+const DOMAINS_PAGE_SIZE = 8;
+
+function stateIcon(state: string): string {
+  return state === "allow" ? "✅" : state === "block" ? "🚫" : "⚪";
+}
+
+async function getDomainsPage(page: number) {
+  const safePage = Math.max(0, Math.floor(page));
+  const offset = safePage * DOMAINS_PAGE_SIZE;
+  const result = await api(`/admin/domains?limit=${DOMAINS_PAGE_SIZE}&offset=${offset}`);
+  const total = Number(result.total ?? 0);
+  const pageCount = Math.max(1, Math.ceil(total / DOMAINS_PAGE_SIZE));
+  const normalizedPage = Math.min(safePage, pageCount - 1);
+
+  if (normalizedPage !== safePage) {
+    return getDomainsPage(normalizedPage);
+  }
+
+  return {
+    items: result.items ?? [],
+    total,
+    page: normalizedPage,
+    pageCount,
+  };
+}
+
+function domainsListView(data: any) {
+  const rows = (data.items ?? []).map((item: any) => ([{
+    text: `${stateIcon(item.state)} ${item.domain} · ${item.count}`,
+    callback_data: `domains:d:${item.key}:${data.page}`,
+  }]));
+
+  const nav: any[] = [];
+  if (data.page > 0) {
+    nav.push({ text: "⬅️", callback_data: `domains:p:${data.page - 1}` });
+  }
+  nav.push({ text: `${data.page + 1}/${data.pageCount}`, callback_data: "domains:noop" });
+  if (data.page < data.pageCount - 1) {
+    nav.push({ text: "➡️", callback_data: `domains:p:${data.page + 1}` });
+  }
+  rows.push(nav);
+
+  return {
+    text: `🌐 Domini osservati\n${data.total} domini · pagina ${data.page + 1}/${data.pageCount}\n\nTocca un dominio per gestirlo.`,
+    reply_markup: { inline_keyboard: rows },
+  };
+}
+
+function domainDetailView(item: any, page: number) {
+  return {
+    text: `${stateIcon(item.state)} ${item.domain}\n\nQuery: ${item.count}\nStato: ${item.state}`,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "⚪ Default", callback_data: `domains:r:default:${item.key}:${page}` },
+          { text: "✅ Allow", callback_data: `domains:r:allow:${item.key}:${page}` },
+          { text: "🚫 Block", callback_data: `domains:r:block:${item.key}:${page}` },
+        ],
+        [{ text: "⬅️ Torna alla lista", callback_data: `domains:p:${page}` }],
+      ],
+    },
+  };
+}
+
+async function editDomainsList(chatId: number, messageId: number, page: number) {
+  const data = await getDomainsPage(page);
+  const view = domainsListView(data);
+  await bot.editMessageText(view.text, {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: view.reply_markup,
+  });
+}
+
+async function findDomainOnPage(key: string, page: number) {
+  const data = await getDomainsPage(page);
+  return {
+    data,
+    item: (data.items ?? []).find((item: any) => item.key === key),
+  };
+}
+
 function helpText(): string {
   return [
     "AdBlock bot commands:",
@@ -167,51 +250,84 @@ function helpText(): string {
 bot.on("callback_query", async query => {
   const userId = query.from.id;
   const chatId = query.message?.chat.id;
+  const messageId = query.message?.message_id;
   const data = query.data ?? "";
 
-  if (!chatId || !isAllowed(userId)) {
+  if (!chatId || !messageId || !isAllowed(userId)) {
     await bot.answerCallbackQuery(query.id, { text: "Unauthorized." });
     return;
   }
 
-  const match = data.match(/^rule:(default|allow|block):([a-f0-9]{16})$/);
-  if (!match) {
-    await bot.answerCallbackQuery(query.id, { text: "Invalid action." });
-    return;
-  }
-
-  const [, action, key] = match;
-
   try {
-    const result = await api("/admin/rules/by-key", {
-      method: "POST",
-      body: JSON.stringify({ action, key }),
-    });
-
-    await bot.answerCallbackQuery(query.id, {
-      text: action === "allow" ? "Allowed" : action === "block" ? "Blocked" : "Default",
-    });
-
-    if (query.message) {
-      const icon = action === "allow" ? "✅" : action === "block" ? "🚫" : "⚪";
-      await bot.editMessageText(
-        `${icon} ${result.domain}\nState: ${action}`,
-        {
-          chat_id: chatId,
-          message_id: query.message.message_id,
-          reply_markup: {
-            inline_keyboard: [[
-              { text: "⚪ Default", callback_data: `rule:default:${key}` },
-              { text: "✅ Allow", callback_data: `rule:allow:${key}` },
-              { text: "🚫 Block", callback_data: `rule:block:${key}` },
-            ]],
-          },
-        },
-      );
+    if (data === "domains:noop") {
+      await bot.answerCallbackQuery(query.id);
+      return;
     }
+
+    const pageMatch = data.match(/^domains:p:(\d+)$/);
+    if (pageMatch) {
+      await editDomainsList(chatId, messageId, Number(pageMatch[1]));
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const detailMatch = data.match(/^domains:d:([a-f0-9]{16}):(\d+)$/);
+    if (detailMatch) {
+      const [, key, pageRaw] = detailMatch;
+      const page = Number(pageRaw);
+      const { item } = await findDomainOnPage(key, page);
+
+      if (!item) {
+        await bot.answerCallbackQuery(query.id, { text: "Dominio non più presente in questa pagina.", show_alert: true });
+        await editDomainsList(chatId, messageId, page);
+        return;
+      }
+
+      const view = domainDetailView(item, page);
+      await bot.editMessageText(view.text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: view.reply_markup,
+      });
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const ruleMatch = data.match(/^domains:r:(default|allow|block):([a-f0-9]{16}):(\d+)$/);
+    if (ruleMatch) {
+      const [, action, key, pageRaw] = ruleMatch;
+      const page = Number(pageRaw);
+      const result = await api("/admin/rules/by-key", {
+        method: "POST",
+        body: JSON.stringify({ action, key }),
+      });
+
+      const { item } = await findDomainOnPage(key, page);
+      const updated = item ?? {
+        key,
+        domain: result.domain,
+        count: 0,
+        state: action,
+      };
+      updated.state = action;
+
+      const view = domainDetailView(updated, page);
+      await bot.editMessageText(view.text, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: view.reply_markup,
+      });
+
+      await bot.answerCallbackQuery(query.id, {
+        text: action === "allow" ? "Consentito" : action === "block" ? "Bloccato" : "Ripristinato a Default",
+      });
+      return;
+    }
+
+    await bot.answerCallbackQuery(query.id, { text: "Azione non valida." });
   } catch (error) {
     await bot.answerCallbackQuery(query.id, {
-      text: error instanceof Error ? error.message.slice(0, 180) : "Error",
+      text: error instanceof Error ? error.message.slice(0, 180) : "Errore",
       show_alert: true,
     });
   }
@@ -252,30 +368,17 @@ bot.on("message", async msg => {
     }
 
     if (text === "/domains") {
-      const s = await api("/admin/domains?limit=12");
-      const items = s.items ?? [];
+      const data = await getDomainsPage(0);
 
-      if (!items.length) {
-        await sendTrackedMessage(chatId, "No domains observed yet.");
+      if (!data.items.length) {
+        await sendTrackedMessage(chatId, "Nessun dominio osservato.");
         return;
       }
 
-      for (const item of items) {
-        const icon = item.state === "allow" ? "✅" : item.state === "block" ? "🚫" : "⚪";
-        await sendTrackedMessage(
-          chatId,
-          `${icon} ${item.domain}\nQueries: ${item.count}\nState: ${item.state}`,
-          {
-            reply_markup: {
-              inline_keyboard: [[
-                { text: "⚪ Default", callback_data: `rule:default:${item.key}` },
-                { text: "✅ Allow", callback_data: `rule:allow:${item.key}` },
-                { text: "🚫 Block", callback_data: `rule:block:${item.key}` },
-              ]],
-            },
-          },
-        );
-      }
+      const view = domainsListView(data);
+      await sendTrackedMessage(chatId, view.text, {
+        reply_markup: view.reply_markup,
+      });
       return;
     }
 
