@@ -82,4 +82,4 @@ The public reverse proxy exposes only:
 - `/install`
 - `/health`
 
-Administrative endpoints under `/admin/*` remain reachable only inside the Docker network and are not forwarded by the public proxy.
+Only the authenticated `/admin/*` endpoints required by the Telegram bot and updater remain available on the Docker network. The public proxy does not forward them.
