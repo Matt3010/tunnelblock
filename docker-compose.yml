@@ -28,92 +28,7 @@ x-doh-common: &doh-common
     start_period: 5s
 
 services:
-  redis:
-    # Transitional compatibility only: old updater revisions explicitly target
-    # this service. It is not part of the normal stack and the new updater
-    # removes its container/volume after self-replacement.
-    profiles:
-      - legacy-bootstrap
-    image: redis:7-alpine
-    restart: unless-stopped
-    command:
-      - redis-server
-      - --appendonly
-      - "yes"
-      - --appendfsync
-      - everysec
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
-      interval: 5s
-      timeout: 2s
-      retries: 5
-      start_period: 3s
-
-  # One-shot compatibility bridge for the legacy updater. It derives the real
-  # host repository path from the running legacy updater, rebuilds the updater
-  # image from the current checkout, and verifies the new process through its
-  # authenticated /status API.
   debug-collector:
-    image: adblock-general-purpose-legacy-bootstrap:latest
-    build:
-      context: .
-      dockerfile: updater/Dockerfile
-    restart: "no"
-    environment:
-      EXPECTED_UPDATER_GENERATION: "2"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command:
-      - sh
-      - -lc
-      - |
-        set -eu
-
-        CURRENT_UPDATER="adblock-general-purpose-updater-1"
-        HOST_REPO_DIR="$$(docker inspect "$$CURRENT_UPDATER" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
-
-        if [ -z "$$HOST_REPO_DIR" ]; then
-          echo "ERROR: unable to derive host repository path from $$CURRENT_UPDATER"
-          exit 31
-        fi
-
-        echo "Legacy bootstrap: host repository is $$HOST_REPO_DIR"
-
-        docker rm -f adblock-general-purpose-bootstrap-helper >/dev/null 2>&1 || true
-
-        docker run --rm \
-          --name adblock-general-purpose-bootstrap-helper \
-          -e HOST_REPO_DIR="$$HOST_REPO_DIR" \
-          -e EXPECTED_UPDATER_GENERATION="2" \
-          -e UPDATER_REPLACE_DELAY_SEC="0" \
-          -v /var/run/docker.sock:/var/run/docker.sock \
-          -v "$$HOST_REPO_DIR:/workspace" \
-          -w /workspace \
-          adblock-general-purpose-legacy-bootstrap:latest \
-          sh -lc '
-            set -eu
-
-            test -f docker-compose.yml || {
-              echo "ERROR: docker-compose.yml is missing from mounted repository"
-              exit 32
-            }
-
-            echo "Legacy bootstrap: starting real debug collector."
-            docker compose build debug-api
-            docker compose up -d --no-deps --force-recreate debug-api
-
-            echo "Legacy bootstrap: rebuilding updater image from current checkout."
-            docker compose build --no-cache updater
-
-            exec /replace-self.sh
-          '
-
-  debug-api:
     build:
       context: ./server
     restart: unless-stopped
@@ -169,7 +84,6 @@ services:
       AUTO_UPDATE_INTERVAL_SEC: 300
       LIST_REFRESH_INTERVAL_HOURS: 24
       UPDATER_STATE_FILE: /updater-data/state.json
-      LEGACY_REDIS_VOLUME: adblock-general-purpose-redis-data
       UPDATER_RUNTIME_GENERATION: "2"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
@@ -213,8 +127,6 @@ services:
 volumes:
   stats-data:
     name: adblock-general-purpose-stats-data
-  redis-data:
-    name: adblock-general-purpose-redis-data
   telegram-data:
     name: adblock-general-purpose-telegram-data
   updater-data:
