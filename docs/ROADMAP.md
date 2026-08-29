@@ -4,38 +4,49 @@
 
 - [x] Repository structure
 - [x] Domain rule engine
-- [x] Unit tests
-- [x] Packet Tunnel skeleton
-- [x] Optional Raspberry Pi debug collector
-- [x] Full available-payload debug event format
+- [x] Debug collector
+- [x] Docker deployment
 
-## M1 - DNS filtering
+## M1 - App-less DoH
 
-- [ ] Parse IPv4/IPv6 UDP packets
-- [ ] Parse DNS queries
-- [ ] Match queried hostnames against RuleEngine
-- [ ] Return blocked DNS responses locally
-- [ ] Forward allowed DNS queries
-- [ ] Stream raw DNS packets/events to the debug collector
+- [x] DNS message parser
+- [x] DoH GET/POST endpoint
+- [x] Domain filtering
+- [x] Empty-answer blocked response
+- [x] Upstream UDP forwarding
+- [x] iOS managed DoH profile template
+- [x] Profile generator
+- [x] Cloudflare-compatible HTTP deployment
 
-## M2 - Tunnel routing
+## M2 - Production hardening
 
-- [ ] Forward non-DNS traffic correctly
-- [ ] TCP/UDP flow observability
-- [ ] Config synchronization
-- [ ] Persistent debug storage on Raspberry Pi
+- [ ] Correct DoH POST raw-body handling
+- [ ] Full DNS name compression support
+- [ ] TCP fallback for truncated upstream responses
+- [ ] IPv6 upstream support
+- [ ] Persistent query/debug logging
+- [ ] Rate limiting
+- [ ] Rule hot reload
+- [ ] Metrics
 
 ## M3 - Rule feeds
 
-- [ ] Import external filter lists
-- [ ] Deduplication and normalization
+- [ ] Import EasyList/AdGuard/OISD-compatible domain feeds
+- [ ] Normalize and deduplicate
 - [ ] Scheduled updates
-- [ ] Per-rule provenance
+- [ ] Rule provenance
+- [ ] Per-client allow/block overrides
 
-## M4 - YouTube experimental
+## M4 - iOS distribution
 
-- [ ] Capture playback traffic on a dedicated test device
-- [ ] Compare ad vs non-ad sessions
-- [ ] QUIC/HTTP3 behavior analysis
-- [ ] Evaluate what can be filtered without TLS interception
-- [ ] Only then evaluate a separate TLS-inspection lab mode
+- [ ] Generate final signed/unsigned mobileconfig
+- [ ] Serve profile from /install
+- [ ] Validate iOS install flow
+- [ ] Validate Wi-Fi and cellular behavior
+
+## M5 - YouTube experimental
+
+- [ ] Measure what DNS-only filtering can block
+- [ ] Compare ad and non-ad playback DNS activity
+- [ ] Identify safe dedicated ad endpoints if any
+- [ ] Document limits of DNS-only blocking
