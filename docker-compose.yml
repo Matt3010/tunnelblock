@@ -65,6 +65,7 @@ services:
     restart: "no"
     environment:
       HOST_REPO_DIR: ${HOST_REPO_DIR:-.}
+      EXPECTED_UPDATER_GENERATION: "2"
     volumes:
       - ${HOST_REPO_DIR:-.}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -74,12 +75,31 @@ services:
       - -lc
       - |
         set -eu
-        echo "Legacy updater bootstrap: starting real debug collector."
+        echo "Legacy bootstrap: starting real debug collector."
         docker compose build debug-api
         docker compose up -d --no-deps --force-recreate debug-api
-        echo "Legacy updater bootstrap: handing updater replacement to watchdog."
-        sleep 5
-        docker compose up -d --no-deps --force-recreate updater-replacer
+
+        echo "Legacy bootstrap: replacing updater runtime."
+        sleep 8
+        docker compose up -d --no-deps --force-recreate updater
+
+        for i in $$(seq 1 45); do
+          CID="$$(docker compose ps -q updater 2>/dev/null || true)"
+          if [ -n "$$CID" ]; then
+            STATE="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$$CID" 2>/dev/null || true)"
+            GENERATION="$$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$$CID" 2>/dev/null | sed -n 's/^UPDATER_RUNTIME_GENERATION=//p' | tail -n 1)"
+            if [ "$$STATE" = "healthy" ] && [ "$$GENERATION" = "$$EXPECTED_UPDATER_GENERATION" ]; then
+              echo "Updater gen $$GENERATION is healthy."
+              exit 0
+            fi
+          fi
+          sleep 1
+        done
+
+        echo "Legacy updater replacement failed."
+        docker compose ps --all updater || true
+        docker compose logs --no-color --tail=120 updater || true
+        exit 1
 
   debug-api:
     build:
@@ -155,43 +175,6 @@ services:
       timeout: 2s
       retries: 5
       start_period: 5s
-
-  updater-replacer:
-    image: adblock-general-purpose-updater:latest
-    restart: "on-failure:5"
-    environment:
-      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-      HOST_REPO_DIR: ${HOST_REPO_DIR:-.}
-      EXPECTED_UPDATER_GENERATION: "2"
-    volumes:
-      - ${HOST_REPO_DIR:-.}:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock
-    working_dir: /workspace
-    command:
-      - sh
-      - -lc
-      - |
-        set -eu
-        sleep 3
-        echo "Recreating updater runtime..."
-        docker compose up -d --no-deps --force-recreate updater
-        for i in $$(seq 1 45); do
-          CID="$$(docker compose ps -q updater 2>/dev/null || true)"
-          if [ -n "$$CID" ]; then
-            STATE="$$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$$CID" 2>/dev/null || true)"
-            if [ "$$STATE" = "healthy" ]; then
-              if curl -fsS                 -H "Authorization: Bearer $$ADMIN_API_TOKEN"                 http://updater:8090/status                 | grep -Fq "\"runtimeGeneration\":\"$$EXPECTED_UPDATER_GENERATION\""; then
-                echo "Updater runtime generation $$EXPECTED_UPDATER_GENERATION is healthy."
-                exit 0
-              fi
-            fi
-          fi
-          sleep 1
-        done
-        echo "Updater replacement verification failed."
-        docker compose ps --all updater || true
-        docker compose logs --no-color --tail=120 updater || true
-        exit 1
 
   telegram-bot:
     build:
