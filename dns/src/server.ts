@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import dgram from "node:dgram";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,54 @@ const rules = RuleEngine.fromFiles(
 
 const upstreamHost = process.env.UPSTREAM_DNS_HOST ?? "1.1.1.1";
 const upstreamPort = Number(process.env.UPSTREAM_DNS_PORT ?? 53);
+const publicDoHUrl =
+  process.env.PUBLIC_DOH_URL ??
+  "https://adblock.scanferlamatteo.work/dns-query";
+
+function buildMobileconfig(): string {
+  const dnsUuid = crypto.randomUUID().toUpperCase();
+  const profileUuid = crypto.randomUUID().toUpperCase();
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>com.apple.dnsSettings.managed</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>PayloadIdentifier</key>
+      <string>work.scanferlamatteo.adblock.doh</string>
+      <key>PayloadUUID</key>
+      <string>${dnsUuid}</string>
+      <key>PayloadDisplayName</key>
+      <string>AdBlock DNS</string>
+      <key>DNSSettings</key>
+      <dict>
+        <key>DNSProtocol</key>
+        <string>HTTPS</string>
+        <key>ServerURL</key>
+        <string>${publicDoHUrl}</string>
+      </dict>
+    </dict>
+  </array>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+  <key>PayloadIdentifier</key>
+  <string>work.scanferlamatteo.adblock</string>
+  <key>PayloadUUID</key>
+  <string>${profileUuid}</string>
+  <key>PayloadDisplayName</key>
+  <string>AdBlock General Purpose</string>
+</dict>
+</plist>
+`;
+}
 
 async function forwardUdp(packet: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -70,6 +119,17 @@ async function resolveDns(packet: Buffer): Promise<Buffer> {
 }
 
 app.get("/health", async () => ({ ok: true }));
+
+app.get("/install", async (_request, reply) => {
+  return reply
+    .header("content-type", "application/x-apple-aspen-config")
+    .header(
+      "content-disposition",
+      'attachment; filename="adblock-general-purpose.mobileconfig"',
+    )
+    .header("cache-control", "no-store")
+    .send(buildMobileconfig());
+});
 
 app.route({
   method: ["GET", "POST"],
