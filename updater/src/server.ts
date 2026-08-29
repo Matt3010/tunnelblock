@@ -182,6 +182,32 @@ async function localSha(): Promise<string> {
   return stdout.trim();
 }
 
+async function cleanupLegacyRedis(): Promise<void> {
+  if (running) return;
+
+  try {
+    await execFileAsync("docker", ["compose", "rm", "-sf", "redis"], {
+      cwd: repoDir,
+      env: process.env,
+    });
+  } catch (error) {
+    app.log.warn({ error }, "legacy-redis-container-cleanup-skipped");
+  }
+
+  try {
+    await execFileAsync("docker", ["volume", "rm", legacyRedisVolume], {
+      cwd: repoDir,
+      env: process.env,
+    });
+    app.log.info({ volume: legacyRedisVolume }, "legacy-redis-removed");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/no such volume/i.test(message)) {
+      app.log.warn({ error }, "legacy-redis-volume-cleanup-skipped");
+    }
+  }
+}
+
 async function refreshExternalBlocklists(): Promise<void> {
   if (!token) return;
 
@@ -257,67 +283,89 @@ if ! docker compose config --quiet; then
   exit 10
 fi
 
-echo "== Pre-flight: build and validate proxy image =="
-if ! docker compose build doh-proxy; then
-  echo "Proxy build/validation failed; restoring previous checkout."
+echo "== Pre-flight: build all deployment images =="
+if ! docker compose build doh-proxy updater doh-a doh-b telegram-bot debug-collector; then
+  echo "Image build failed; restoring previous checkout."
   git reset --hard "$PREVIOUS_SHA"
   exit 11
 fi
 
+echo "== Pre-flight: DNS unit tests =="
+if ! docker compose run --rm --no-deps --entrypoint npm doh-a test; then
+  echo "DNS tests failed; no runtime containers were changed."
+  git reset --hard "$PREVIOUS_SHA"
+  exit 12
+fi
+
 echo "== Pre-flight passed =="
 
-docker compose build updater doh-a doh-b telegram-bot debug-collector
-
-rollback_failed_resolver() {
+service_ready() {
   SERVICE="$1"
-  EXIT_CODE="$2"
+  CID="$(docker compose ps -q --all "$SERVICE" 2>/dev/null || true)"
+  [ -n "$CID" ] || return 1
 
-  echo "ERROR: $SERVICE failed to become ready."
+  STATUS="$(docker inspect "$CID" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+  [ "$STATUS" = "healthy" ]
+}
+
+wait_ready() {
+  SERVICE="$1"
+  for i in $(seq 1 45); do
+    if service_ready "$SERVICE"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+dump_service() {
+  SERVICE="$1"
   echo "== $SERVICE container status =="
-  docker compose ps "$SERVICE" || true
+  docker compose ps --all "$SERVICE" || true
   echo "== $SERVICE recent logs =="
   docker compose logs --no-color --tail=120 "$SERVICE" || true
+}
 
-  echo "== Attempting rollback of $SERVICE to previous revision $PREVIOUS_SHA =="
+rollback_resolvers() {
+  FAILED_SERVICE="$1"
+  EXIT_CODE="$2"
+
+  echo "ERROR: $FAILED_SERVICE failed to become ready."
+  dump_service "$FAILED_SERVICE"
+
+  echo "== Rolling BOTH resolvers back to $PREVIOUS_SHA =="
   git reset --hard "$PREVIOUS_SHA"
 
-  if docker compose build "$SERVICE" && docker compose up -d --no-deps "$SERVICE"; then
-    for j in $(seq 1 30); do
-      if docker compose exec -T "$SERVICE" node -e "fetch('http://127.0.0.1:8053/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
-        echo "Rollback recovered $SERVICE."
-        break
-      fi
-      sleep 1
-    done
+  ROLLBACK_OK=1
+  if ! docker compose build doh-a doh-b; then
+    echo "WARNING: rollback image build failed."
+    ROLLBACK_OK=0
+  elif ! docker compose up -d --no-deps doh-a doh-b; then
+    echo "WARNING: rollback container recreation failed."
+    ROLLBACK_OK=0
   else
-    echo "WARNING: automatic rollback of $SERVICE also failed."
+    wait_ready doh-a || ROLLBACK_OK=0
+    wait_ready doh-b || ROLLBACK_OK=0
   fi
 
-  echo "Deployment remains FAILED even if rollback recovered the resolver."
+  if [ "$ROLLBACK_OK" -eq 1 ]; then
+    echo "Rollback recovered both resolvers."
+  else
+    echo "WARNING: rollback did not fully recover both resolvers."
+    dump_service doh-a
+    dump_service doh-b
+  fi
+
+  echo "Deployment remains FAILED regardless of rollback outcome."
   exit "$EXIT_CODE"
 }
 
-docker compose up -d doh-a
-DOH_A_READY=0
-for i in $(seq 1 30); do
-  if docker compose exec -T doh-a node -e "fetch('http://127.0.0.1:8053/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
-    DOH_A_READY=1
-    break
-  fi
-  sleep 1
-done
-[ "$DOH_A_READY" -eq 1 ] || rollback_failed_resolver doh-a 21
+docker compose up -d --no-deps doh-a
+wait_ready doh-a || rollback_resolvers doh-a 21
 
-docker compose up -d doh-b
-DOH_B_READY=0
-for i in $(seq 1 30); do
-  if docker compose exec -T doh-b node -e "fetch('http://127.0.0.1:8053/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
-    DOH_B_READY=1
-    break
-  fi
-  sleep 1
-done
-[ "$DOH_B_READY" -eq 1 ] || rollback_failed_resolver doh-b 22
+docker compose up -d --no-deps doh-b
+wait_ready doh-b || rollback_resolvers doh-b 22
 
 docker compose up -d --no-deps --force-recreate doh-proxy
 docker compose up -d --no-deps telegram-bot debug-collector
@@ -443,6 +491,7 @@ await app.listen({
 });
 
 setTimeout(() => void checkForUpdates(), 10_000);
+setTimeout(() => void cleanupLegacyRedis(), 30_000);
 setTimeout(() => void refreshExternalBlocklists(), 60_000);
 setInterval(() => void checkForUpdates(), pollIntervalSec * 1000);
 setInterval(
