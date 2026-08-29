@@ -186,7 +186,7 @@ async function cleanupLegacyRedis(): Promise<void> {
   if (running) return;
 
   try {
-    await execFileAsync("docker", ["compose", "rm", "-sf", "redis"], {
+    await execFileAsync("docker", ["compose", "--profile", "legacy-bootstrap", "rm", "-sf", "redis"], {
       cwd: repoDir,
       env: process.env,
     });
@@ -295,6 +295,23 @@ if ! docker compose run --rm --no-deps --entrypoint npm doh-a test; then
   echo "DNS tests failed; no runtime containers were changed."
   git reset --hard "$PREVIOUS_SHA"
   exit 12
+fi
+
+echo "== Pre-flight: TypeScript checks =="
+if ! docker compose run --rm --no-deps --entrypoint npm doh-a run typecheck; then
+  echo "DNS typecheck failed; no runtime containers were changed."
+  git reset --hard "$PREVIOUS_SHA"
+  exit 13
+fi
+if ! docker compose run --rm --no-deps --entrypoint npm telegram-bot run typecheck; then
+  echo "Telegram typecheck failed; no runtime containers were changed."
+  git reset --hard "$PREVIOUS_SHA"
+  exit 14
+fi
+if ! docker compose run --rm --no-deps --entrypoint npm updater run typecheck; then
+  echo "Updater typecheck failed; no runtime containers were changed."
+  git reset --hard "$PREVIOUS_SHA"
+  exit 15
 fi
 
 echo "== Pre-flight passed =="
