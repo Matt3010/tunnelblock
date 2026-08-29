@@ -41,12 +41,32 @@ describe("RuleEngine", () => {
     });
   });
 
+  it("returns the exact matching parent rule", () => {
+    const rules = new RuleEngine(
+      new Set(["example.com"]),
+      new Set(),
+      new Set(),
+    );
+
+    expect(rules.explain("ads.deep.example.com")).toEqual({
+      decision: "block",
+      source: "manual-block",
+      matchedRule: "example.com",
+    });
+  });
+
   it("allows unmatched domains by default", () => {
     const rules = new RuleEngine(new Set(), new Set(), new Set());
 
     expect(rules.decideDetailed("example.org")).toEqual({
       decision: "allow",
       source: "default",
+    });
+
+    expect(rules.explain("example.org")).toEqual({
+      decision: "allow",
+      source: "default",
+      matchedRule: null,
     });
   });
 });
