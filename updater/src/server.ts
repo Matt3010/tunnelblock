@@ -263,7 +263,7 @@ PREVIOUS_SHA="$(git rev-parse HEAD)"
 git reset --hard "origin/${branch}"
 
 UPDATER_CONTAINER_ID="$(docker ps -q \
-  --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-adblock-general-purpose}" \
+  --filter "label=com.docker.compose.project=\${COMPOSE_PROJECT_NAME:-adblock-general-purpose}" \
   --filter "label=com.docker.compose.service=updater" \
   | head -n 1)"
 
