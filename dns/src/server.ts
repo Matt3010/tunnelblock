@@ -337,6 +337,9 @@ app.post("/admin/rules/by-key", async (request, reply) => {
     } else if (action === "allow") {
       addRule(allowPath, domain);
       removeRule(blockPath, domain);
+    } else if (action === "default") {
+      removeRule(blockPath, domain);
+      removeRule(allowPath, domain);
     } else {
       return reply.code(400).send({ error: "invalid action" });
     }
@@ -371,6 +374,10 @@ app.post("/admin/rules", async (request, reply) => {
         removeRule(blockPath, domain);
         break;
       case "unallow":
+        removeRule(allowPath, domain);
+        break;
+      case "default":
+        removeRule(blockPath, domain);
         removeRule(allowPath, domain);
         break;
       default:
