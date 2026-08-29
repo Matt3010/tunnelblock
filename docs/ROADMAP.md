@@ -26,15 +26,15 @@
 - [ ] IPv6 upstream support
 - [ ] Persistent query/debug logging
 - [ ] Rate limiting
-- [ ] Rule hot reload
-- [ ] Metrics
+- [x] Rule hot reload
+- [x] Resolver/query metrics via SQLite
 
 ## M3 - Rule feeds
 
-- [ ] Import EasyList/AdGuard/OISD-compatible domain feeds
-- [ ] Normalize and deduplicate
-- [ ] Scheduled updates
-- [ ] Rule provenance
+- [x] Import EasyList/AdGuard/OISD-compatible domain feeds
+- [x] Normalize and deduplicate
+- [x] Scheduled updates
+- [x] Rule provenance, multi-list attribution and overlap diagnostics
 - [ ] Per-client allow/block overrides
 
 ## M4 - iOS distribution
