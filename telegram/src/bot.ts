@@ -58,7 +58,7 @@ async function sendTrackedMessage(
   text: string,
   options?: TelegramBot.SendMessageOptions,
 ) {
-  const sent = await sendTrackedMessage(chatId, text, options);
+  const sent = await bot.sendMessage(chatId, text, options);
   trackMessage(sent.chat.id, sent.message_id, (sent.date ?? Math.floor(Date.now() / 1000)) * 1000);
   return sent;
 }
