@@ -29,6 +29,11 @@ x-doh-common: &doh-common
 
 services:
   redis:
+    # Transitional compatibility only: old updater revisions explicitly target
+    # this service. It is not part of the normal stack and the new updater
+    # removes its container/volume after self-replacement.
+    profiles:
+      - legacy-bootstrap
     image: redis:7-alpine
     restart: unless-stopped
     command:
@@ -93,11 +98,14 @@ services:
       COMPOSE_PROJECT_NAME: adblock-general-purpose
       AUTO_UPDATE_INTERVAL_SEC: 300
       LIST_REFRESH_INTERVAL_HOURS: 24
+      UPDATER_STATE_FILE: /updater-data/state.json
+      LEGACY_REDIS_VOLUME: adblock-general-purpose-redis-data
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
     volumes:
       - ${HOST_REPO_DIR:-.}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
+      - updater-data:/updater-data
     healthcheck:
       test:
         - CMD
@@ -137,3 +145,5 @@ volumes:
     name: adblock-general-purpose-redis-data
   telegram-data:
     name: adblock-general-purpose-telegram-data
+  updater-data:
+    name: adblock-general-purpose-updater-data
