@@ -244,7 +244,7 @@ async function resolveDns(packet: Buffer): Promise<Buffer> {
 
 app.get("/health", async () => ({
   ok: true,
-  statsStorage: statsReady() ? "redis" : "degraded",
+  statsStorage: statsReady() ? "sqlite" : "degraded",
 }));
 
 app.get("/ready", async (_request, reply) => {
@@ -258,7 +258,7 @@ app.get("/ready", async (_request, reply) => {
 
   return {
     ok: true,
-    statsStorage: "redis",
+    statsStorage: "sqlite",
   };
 });
 
@@ -278,7 +278,7 @@ app.get("/admin/status", async (request, reply) => {
     return {
       ok: true,
       uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
-      statsStorage: "redis",
+      statsStorage: "sqlite",
       blocklists: blocklists.list().length,
       externalBlockedDomains: blocklists.combinedDomainCount(),
       ...stats,
