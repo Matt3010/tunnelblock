@@ -7,7 +7,10 @@ RUN npm install
 
 COPY dns/src ./src
 COPY dns/test ./test
-COPY rules /rules
+COPY rules /defaults
+COPY dns/entrypoint.sh /entrypoint.sh
+
+RUN chmod +x /entrypoint.sh
 
 ENV HOST=0.0.0.0
 ENV PORT=8053
@@ -16,4 +19,4 @@ ENV UPSTREAM_DNS_PORT=53
 
 EXPOSE 8053
 
-CMD ["npm", "start"]
+ENTRYPOINT ["/entrypoint.sh"]
