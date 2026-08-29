@@ -54,7 +54,34 @@ services:
       retries: 5
       start_period: 3s
 
+  # Compatibility bridge for the updater runtime that predates reliable
+  # self-replacement. The legacy updater already starts this service on deploy,
+  # so it can hand control to the independent updater-replacer exactly once.
   debug-collector:
+    image: adblock-general-purpose-legacy-bootstrap:latest
+    build:
+      context: .
+      dockerfile: updater/Dockerfile
+    restart: "no"
+    environment:
+      HOST_REPO_DIR: ${HOST_REPO_DIR:-.}
+    volumes:
+      - ${HOST_REPO_DIR:-.}:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /workspace
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        echo "Legacy updater bootstrap: starting real debug collector."
+        docker compose build debug-api
+        docker compose up -d --no-deps --force-recreate debug-api
+        echo "Legacy updater bootstrap: handing updater replacement to watchdog."
+        sleep 5
+        docker compose up -d --no-deps --force-recreate updater-replacer
+
+  debug-api:
     build:
       context: ./server
     restart: unless-stopped
@@ -64,6 +91,16 @@ services:
       DEBUG_TOKEN: ${DEBUG_TOKEN:-change-me}
     ports:
       - "8787:8787"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 2s
+      retries: 5
+      start_period: 3s
 
   doh-a:
     <<: *doh-common
@@ -118,6 +155,43 @@ services:
       timeout: 2s
       retries: 5
       start_period: 5s
+
+  updater-replacer:
+    image: adblock-general-purpose-updater:latest
+    restart: "on-failure:5"
+    environment:
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      HOST_REPO_DIR: ${HOST_REPO_DIR:-.}
+      EXPECTED_UPDATER_GENERATION: "2"
+    volumes:
+      - ${HOST_REPO_DIR:-.}:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /workspace
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        sleep 3
+        echo "Recreating updater runtime..."
+        docker compose up -d --no-deps --force-recreate updater
+        for i in $(seq 1 45); do
+          CID="$(docker compose ps -q updater 2>/dev/null || true)"
+          if [ -n "$CID" ]; then
+            STATE="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CID" 2>/dev/null || true)"
+            if [ "$STATE" = "healthy" ]; then
+              if curl -fsS                 -H "Authorization: Bearer $ADMIN_API_TOKEN"                 http://updater:8090/status                 | grep -Fq "\"runtimeGeneration\":\"$EXPECTED_UPDATER_GENERATION\""; then
+                echo "Updater runtime generation $EXPECTED_UPDATER_GENERATION is healthy."
+                exit 0
+              fi
+            fi
+          fi
+          sleep 1
+        done
+        echo "Updater replacement verification failed."
+        docker compose ps --all updater || true
+        docker compose logs --no-color --tail=120 updater || true
+        exit 1
 
   telegram-bot:
     build:
