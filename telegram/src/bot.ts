@@ -127,12 +127,15 @@ async function requestJson(base: string, path: string, init?: RequestInit) {
       try { body = JSON.parse(text); } catch {}
 
       if (!res.ok) {
-        throw new Error(`Admin API ${res.status}: ${text}`);
+        const error = new Error(`Admin API ${res.status}: ${text}`) as Error & { noRetry?: boolean };
+        error.noRetry = res.status >= 400 && res.status < 500;
+        throw error;
       }
 
       return body as any;
     } catch (error) {
       lastError = error;
+      if ((error as Error & { noRetry?: boolean })?.noRetry) throw error;
       if (attempt < 4) await new Promise(resolve => setTimeout(resolve, 750 * attempt));
     }
   }
