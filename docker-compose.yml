@@ -85,6 +85,7 @@ services:
       - "8053:8053"
 
   updater:
+    image: adblock-general-purpose-updater:latest
     build:
       context: .
       dockerfile: updater/Dockerfile
@@ -100,6 +101,7 @@ services:
       LIST_REFRESH_INTERVAL_HOURS: 24
       UPDATER_STATE_FILE: /updater-data/state.json
       LEGACY_REDIS_VOLUME: adblock-general-purpose-redis-data
+      UPDATER_RUNTIME_GENERATION: "2"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
     volumes:
@@ -135,6 +137,7 @@ services:
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
       TELEGRAM_CLEANUP_INTERVAL_HOURS: 12
       TELEGRAM_DATA_DIR: /telegram-data
+      BOT_RUNTIME_GENERATION: "2"
     volumes:
       - telegram-data:/telegram-data
 
