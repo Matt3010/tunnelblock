@@ -666,9 +666,24 @@ bot.on("message", async msg => {
         ? `${updaterResult.value.running ? "running" : (updaterResult.value.lastSuccess === true ? "success" : updaterResult.value.lastSuccess === false ? "failed" : "idle")} @ ${updaterResult.value.currentSha ?? "-"}`
         : `ERRORE: ${updaterResult.reason instanceof Error ? updaterResult.reason.message : String(updaterResult.reason)}`;
 
+      const serviceLines = updaterResult.status === "fulfilled" && updaterResult.value.services
+        ? [
+            `doh-a: ${updaterResult.value.services.dohA ?? "unknown"}`,
+            `doh-b: ${updaterResult.value.services.dohB ?? "unknown"}`,
+            `proxy: ${updaterResult.value.services.proxy ?? "unknown"}`,
+            `bot: ${updaterResult.value.services.telegram ?? "unknown"}`,
+          ]
+        : [];
+
       await sendTrackedMessage(
         chatId,
-        `🩺 Diagnostica\nResolver: ${health}\nStorage ready: ${ready}\nUpdater: ${updater}`,
+        [
+          "🩺 Diagnostica",
+          `Resolver: ${health}`,
+          `Storage ready: ${ready}`,
+          `Updater: ${updater}`,
+          ...serviceLines,
+        ].join("\n"),
       );
       return;
     }
