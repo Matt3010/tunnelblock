@@ -83,3 +83,21 @@ The public reverse proxy exposes only:
 - `/health`
 
 Only the authenticated `/admin/*` endpoints required by the Telegram bot and updater remain available on the Docker network. The public proxy does not forward them.
+
+
+## Self-updating deployment
+
+The updater is only the trigger. It does not keep the deployment procedure in memory.
+
+On a manual `/update` or when a new `master` SHA is detected:
+
+1. the updater starts a temporary deployment helper;
+2. the helper fetches and resets the repository to the current `origin/master`;
+3. the helper executes `ops/deploy.sh` from that fresh checkout;
+4. the complete Compose stack is built;
+5. DNS tests and TypeScript checks run before runtime containers are changed;
+6. the complete stack is recreated with orphan cleanup;
+7. the updater is verified by its baked-in `runtimeBuildSha`;
+8. failures trigger a rebuild/recreate rollback to the previous SHA.
+
+Deployment state and logs live in the persistent updater data volume, so replacing the updater container does not lose `/update_status` state.
