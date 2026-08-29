@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import Fastify from "fastify";
 
@@ -11,15 +11,23 @@ const token = process.env.ADMIN_API_TOKEN;
 const githubToken = process.env.GITHUB_TOKEN;
 const repoDir = process.env.REPO_DIR ?? "/workspace";
 const branch = process.env.GIT_BRANCH ?? "master";
+const composeProjectName = process.env.COMPOSE_PROJECT_NAME ?? "adblock-general-purpose";
+const updaterDataVolume =
+  process.env.UPDATER_DATA_VOLUME ?? "adblock-general-purpose-updater-data";
 const pollIntervalSec = Number(process.env.AUTO_UPDATE_INTERVAL_SEC ?? 300);
 const listRefreshIntervalHours = Number(process.env.LIST_REFRESH_INTERVAL_HOURS ?? 24);
 const runtimeGeneration = process.env.UPDATER_RUNTIME_GENERATION ?? "unknown";
+const runtimeBuildSha = process.env.UPDATER_BUILD_SHA ?? "unknown";
 const runtimeStartedAt = new Date().toISOString();
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const telegramUserIds = (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
   .split(",")
-  .map(v => v.trim())
+  .map(value => value.trim())
   .filter(Boolean);
+
+const updaterStateFile = process.env.UPDATER_STATE_FILE ?? "/updater-data/state.json";
+const updaterLogFile = process.env.UPDATER_LOG_FILE ?? "/updater-data/deploy.log";
+const helperName = "adblock-general-purpose-deploy-helper";
 
 type UpdateState = {
   running: boolean;
@@ -31,7 +39,20 @@ type UpdateState = {
   failedRemoteSha: string | null;
 };
 
-const updaterStateFile = process.env.UPDATER_STATE_FILE ?? "/updater-data/state.json";
+let launching = false;
+
+function defaultState(): UpdateState {
+  return {
+    running: false,
+    lastStartedAt: null,
+    lastFinishedAt: null,
+    lastSuccess: null,
+    lastOutput: "No update has run yet.",
+    lastSeenRemoteSha: null,
+    failedRemoteSha: null,
+  };
+}
+
 function loadUpdateState(): UpdateState {
   try {
     const parsed = JSON.parse(fs.readFileSync(updaterStateFile, "utf8")) as Partial<UpdateState>;
@@ -40,65 +61,40 @@ function loadUpdateState(): UpdateState {
       lastStartedAt: typeof parsed.lastStartedAt === "string" ? parsed.lastStartedAt : null,
       lastFinishedAt: typeof parsed.lastFinishedAt === "string" ? parsed.lastFinishedAt : null,
       lastSuccess: typeof parsed.lastSuccess === "boolean" ? parsed.lastSuccess : null,
-      lastOutput: typeof parsed.lastOutput === "string" ? parsed.lastOutput : "No update has run yet.",
-      lastSeenRemoteSha: typeof parsed.lastSeenRemoteSha === "string" ? parsed.lastSeenRemoteSha : null,
-      failedRemoteSha: typeof parsed.failedRemoteSha === "string" ? parsed.failedRemoteSha : null,
+      lastOutput:
+        typeof parsed.lastOutput === "string"
+          ? parsed.lastOutput
+          : "No update has run yet.",
+      lastSeenRemoteSha:
+        typeof parsed.lastSeenRemoteSha === "string" ? parsed.lastSeenRemoteSha : null,
+      failedRemoteSha:
+        typeof parsed.failedRemoteSha === "string" ? parsed.failedRemoteSha : null,
     };
   } catch {
-    return {
-      running: false,
-      lastStartedAt: null,
-      lastFinishedAt: null,
-      lastSuccess: null,
-      lastOutput: "No update has run yet.",
-      lastSeenRemoteSha: null,
-      failedRemoteSha: null,
-    };
+    return defaultState();
   }
 }
 
-const loadedState = loadUpdateState();
-let running = false;
-let lastStartedAt = loadedState.lastStartedAt;
-let lastFinishedAt = loadedState.lastFinishedAt;
-let lastSuccess = loadedState.lastSuccess;
-let lastOutput = loadedState.lastOutput;
-let lastSeenRemoteSha = loadedState.lastSeenRemoteSha;
-let failedRemoteSha = loadedState.failedRemoteSha;
-let persistTimer: NodeJS.Timeout | undefined;
-
-function persistUpdateState(): void {
+function persistUpdateState(state: UpdateState): void {
   fs.mkdirSync(path.dirname(updaterStateFile), { recursive: true });
   const tmp = `${updaterStateFile}.tmp-${process.pid}`;
-  const state: UpdateState = {
-    running,
-    lastStartedAt,
-    lastFinishedAt,
-    lastSuccess,
-    lastOutput,
-    lastSeenRemoteSha,
-    failedRemoteSha,
-  };
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n");
   fs.renameSync(tmp, updaterStateFile);
 }
 
-function schedulePersistUpdateState(): void {
-  if (persistTimer) return;
-  persistTimer = setTimeout(() => {
-    persistTimer = undefined;
-    persistUpdateState();
-  }, 250);
+function tail(value: string, max = 12000): string {
+  return value.length <= max ? value : value.slice(-max);
 }
 
-if (loadedState.running) {
-  lastFinishedAt = new Date().toISOString();
-  lastSuccess = false;
-  lastOutput = tail(
-    loadedState.lastOutput +
-      "\nUpdater restarted while a deployment was running; previous deployment marked interrupted.\n",
-  );
-  persistUpdateState();
+function liveUpdateState(): UpdateState {
+  const state = loadUpdateState();
+
+  try {
+    const liveOutput = fs.readFileSync(updaterLogFile, "utf8");
+    if (liveOutput) state.lastOutput = tail(liveOutput);
+  } catch {}
+
+  return state;
 }
 
 function authorized(request: any, reply: any): boolean {
@@ -106,15 +102,13 @@ function authorized(request: any, reply: any): boolean {
     reply.code(503).send({ error: "ADMIN_API_TOKEN not configured" });
     return false;
   }
+
   if (request.headers.authorization !== `Bearer ${token}`) {
     reply.code(401).send({ error: "unauthorized" });
     return false;
   }
-  return true;
-}
 
-function tail(value: string, max = 12000): string {
-  return value.length <= max ? value : value.slice(-max);
+  return true;
 }
 
 async function notifyTelegram(message: string): Promise<void> {
@@ -136,47 +130,39 @@ async function notifyTelegram(message: string): Promise<void> {
   }
 }
 
+function githubAuthHeader(): string {
+  if (!githubToken) throw new Error("GITHUB_TOKEN is not configured");
+  return Buffer.from(`x-access-token:${githubToken}`).toString("base64");
+}
+
 async function fetchRemoteSha(): Promise<string> {
-  await execFileAsync(
-    "git",
-    ["config", "--global", "--add", "safe.directory", repoDir],
-    { cwd: repoDir },
-  ).catch(() => {});
-
-  const env = { ...process.env };
-
-  if (!githubToken) {
-    throw new Error("GITHUB_TOKEN is not configured");
-  }
-
-  const auth = Buffer.from(`x-access-token:${githubToken}`).toString("base64");
-
-  await execFileAsync(
+  const auth = githubAuthHeader();
+  const { stdout } = await execFileAsync(
     "git",
     [
       "-c",
       `http.extraHeader=Authorization: Basic ${auth}`,
       "-c",
       "credential.helper=",
-      "fetch",
+      "ls-remote",
       "origin",
-      branch,
+      `refs/heads/${branch}`,
     ],
-    { cwd: repoDir, env },
+    { cwd: repoDir, env: process.env },
   );
 
-  const { stdout } = await execFileAsync(
-    "git",
-    ["rev-parse", `origin/${branch}`],
-    { cwd: repoDir, env },
-  );
+  const sha = stdout.trim().split(/\s+/)[0];
+  if (!/^[a-f0-9]{40}$/i.test(sha ?? "")) {
+    throw new Error("Unable to resolve remote branch SHA");
+  }
 
-  return stdout.trim();
+  return sha;
 }
 
 async function localSha(): Promise<string> {
   const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
     cwd: repoDir,
+    env: process.env,
   });
   return stdout.trim();
 }
@@ -201,10 +187,84 @@ async function serviceRuntimeState(service: string): Promise<string> {
       ],
       { cwd: repoDir, env: process.env },
     );
+
     return stateOutput.trim() || "unknown";
   } catch {
     return "unknown";
   }
+}
+
+async function resolveHostRepoDir(): Promise<string> {
+  const { stdout: ids } = await execFileAsync(
+    "docker",
+    [
+      "ps",
+      "-q",
+      "--filter",
+      `label=com.docker.compose.project=${composeProjectName}`,
+      "--filter",
+      "label=com.docker.compose.service=updater",
+    ],
+    { env: process.env },
+  );
+
+  const containerId = ids.trim().split(/\s+/)[0];
+  if (!containerId) throw new Error("Unable to locate running updater container");
+
+  const { stdout } = await execFileAsync(
+    "docker",
+    [
+      "inspect",
+      "--format",
+      '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}',
+      containerId,
+    ],
+    { env: process.env },
+  );
+
+  const hostRepoDir = stdout.trim();
+  if (!hostRepoDir) throw new Error("Unable to resolve host repository path");
+
+  return hostRepoDir;
+}
+
+async function deploymentHelperExists(): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync(
+      "docker",
+      ["ps", "-aq", "--filter", `name=^${helperName}$`],
+      { env: process.env },
+    );
+    return Boolean(stdout.trim());
+  } catch {
+    return false;
+  }
+}
+
+async function reconcileInterruptedDeployment(): Promise<void> {
+  const state = loadUpdateState();
+  if (!state.running) return;
+  if (await deploymentHelperExists()) return;
+
+  const startedAt = state.lastStartedAt ? Date.parse(state.lastStartedAt) : NaN;
+  if (Number.isFinite(startedAt) && Date.now() - startedAt < 30_000) return;
+
+  const finishedAt = new Date().toISOString();
+  const failedState: UpdateState = {
+    ...state,
+    running: false,
+    lastFinishedAt: finishedAt,
+    lastSuccess: false,
+    lastOutput: tail(
+      state.lastOutput +
+        "\nDeployment helper is no longer running; deployment marked interrupted.\n",
+    ),
+  };
+
+  persistUpdateState(failedState);
+  await notifyTelegram(
+    "❌ Aggiornamento AdBlock interrotto: il deployment helper non è più in esecuzione.",
+  );
 }
 
 async function refreshExternalBlocklists(): Promise<void> {
@@ -220,292 +280,180 @@ async function refreshExternalBlocklists(): Promise<void> {
       body: "{}",
     });
 
-    const text = await response.text();
+    const responseText = await response.text();
     if (!response.ok) {
-      throw new Error(`Blocklist refresh failed: HTTP ${response.status} ${text}`);
+      throw new Error(
+        `Blocklist refresh failed: HTTP ${response.status} ${responseText}`,
+      );
     }
 
-    app.log.info({ result: text }, "external-blocklists-refreshed");
+    app.log.info({ result: responseText }, "external-blocklists-refreshed");
   } catch (error) {
     app.log.error({ error }, "external-blocklist-refresh-failed");
   }
 }
 
-function runUpdate(trigger: "manual" | "automatic" = "manual") {
-  running = true;
-  lastStartedAt = new Date().toISOString();
-  lastFinishedAt = null;
-  lastSuccess = null;
-  lastOutput = "";
-  persistUpdateState();
+async function launchDeployment(
+  trigger: "manual" | "automatic",
+): Promise<{ started: boolean; helperId?: string }> {
+  if (launching) return { started: false };
 
-  void notifyTelegram(
-    trigger === "automatic"
-      ? "🔄 Nuovo push su master rilevato. Aggiornamento AdBlock avviato."
-      : "🔄 Aggiornamento AdBlock avviato.",
-  );
+  const currentState = loadUpdateState();
+  if (currentState.running) return { started: false };
+  if (!githubToken) throw new Error("GITHUB_TOKEN is not configured");
 
-  const script = `
-set -eu
-cd "${repoDir}"
+  launching = true;
+  const startedAt = new Date().toISOString();
 
-# Git runs as root inside the updater container, but /workspace is a bind mount
-# owned by the host user. Preserve that ownership even when the deployment
-# fails midway, otherwise future host-side git commands lose write access.
-REPO_UID="$(stat -c '%u' "${repoDir}")"
-REPO_GID="$(stat -c '%g' "${repoDir}")"
-restore_repo_ownership() {
-  chown -R "$REPO_UID:$REPO_GID" "${repoDir}" 2>/dev/null || true
-}
-trap restore_repo_ownership EXIT
-
-git config --global --add safe.directory "${repoDir}"
-
-if [ -z "\${GITHUB_TOKEN:-}" ]; then
-  echo "GITHUB_TOKEN is not configured"
-  exit 2
-fi
-
-AUTH="$(printf 'x-access-token:%s' "\${GITHUB_TOKEN}" | base64 | tr -d '\n')"
-git -c http.extraHeader="Authorization: Basic $AUTH" -c credential.helper= fetch origin "${branch}"
-
-PREVIOUS_SHA="$(git rev-parse HEAD)"
-git reset --hard "origin/${branch}"
-
-UPDATER_CONTAINER_ID="$(docker ps -q \
-  --filter "label=com.docker.compose.project=\${COMPOSE_PROJECT_NAME:-adblock-general-purpose}" \
-  --filter "label=com.docker.compose.service=updater" \
-  | head -n 1)"
-
-if [ -z "$UPDATER_CONTAINER_ID" ]; then
-  echo "Unable to locate running updater container"
-  exit 3
-fi
-
-HOST_REPO_DIR="$(docker inspect "$UPDATER_CONTAINER_ID" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}')"
-if [ -z "$HOST_REPO_DIR" ]; then
-  echo "Unable to resolve host repository path for /workspace"
-  exit 3
-fi
-
-# HOST_REPO_DIR is a Docker-host path. It is intentionally not required to
-# exist inside this container; Docker Compose passes it to the host daemon.
-export HOST_REPO_DIR
-echo "Using host repository path: $HOST_REPO_DIR"
-
-echo "== Pre-flight: repository files =="
-test -f "${repoDir}/docker-compose.yml"
-test -f "${repoDir}/proxy/Caddyfile"
-mkdir -p "${repoDir}/data/rules"
-
-echo "== Pre-flight: docker compose config =="
-if ! docker compose config --quiet; then
-  echo "Compose validation failed; restoring previous checkout."
-  git reset --hard "$PREVIOUS_SHA"
-  exit 10
-fi
-
-echo "== Pre-flight: build all deployment images =="
-if ! docker compose build doh-proxy updater doh-a doh-b telegram-bot; then
-  echo "Image build failed; restoring previous checkout."
-  git reset --hard "$PREVIOUS_SHA"
-  exit 11
-fi
-
-echo "== Pre-flight: DNS unit tests =="
-if ! docker compose run --rm --no-deps --entrypoint npm doh-a test; then
-  echo "DNS tests failed; no runtime containers were changed."
-  git reset --hard "$PREVIOUS_SHA"
-  exit 12
-fi
-
-echo "== Pre-flight: TypeScript checks =="
-if ! docker compose run --rm --no-deps --entrypoint npm doh-a run typecheck; then
-  echo "DNS typecheck failed; no runtime containers were changed."
-  git reset --hard "$PREVIOUS_SHA"
-  exit 13
-fi
-if ! docker compose run --rm --no-deps --entrypoint npm telegram-bot run typecheck; then
-  echo "Telegram typecheck failed; no runtime containers were changed."
-  git reset --hard "$PREVIOUS_SHA"
-  exit 14
-fi
-if ! docker compose run --rm --no-deps --entrypoint npm updater run typecheck; then
-  echo "Updater typecheck failed; no runtime containers were changed."
-  git reset --hard "$PREVIOUS_SHA"
-  exit 15
-fi
-
-echo "== Pre-flight passed =="
-
-service_ready() {
-  SERVICE="$1"
-  CID="$(docker compose ps -q --all "$SERVICE" 2>/dev/null || true)"
-  [ -n "$CID" ] || return 1
-
-  STATUS="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CID" 2>/dev/null || true)"
-  [ "$STATUS" = "healthy" ]
-}
-
-wait_ready() {
-  SERVICE="$1"
-  for i in $(seq 1 45); do
-    if service_ready "$SERVICE"; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
-}
-
-dump_service() {
-  SERVICE="$1"
-  echo "== $SERVICE container status =="
-  docker compose ps --all "$SERVICE" || true
-  echo "== $SERVICE recent logs =="
-  docker compose logs --no-color --tail=120 "$SERVICE" || true
-}
-
-rollback_resolvers() {
-  FAILED_SERVICE="$1"
-  EXIT_CODE="$2"
-
-  echo "ERROR: $FAILED_SERVICE failed to become ready."
-  dump_service "$FAILED_SERVICE"
-
-  echo "== Rolling BOTH resolvers back to $PREVIOUS_SHA =="
-  git reset --hard "$PREVIOUS_SHA"
-
-  ROLLBACK_OK=1
-  if ! docker compose build doh-a doh-b; then
-    echo "WARNING: rollback image build failed."
-    ROLLBACK_OK=0
-  elif ! docker compose up -d --no-deps doh-a doh-b; then
-    echo "WARNING: rollback container recreation failed."
-    ROLLBACK_OK=0
-  else
-    wait_ready doh-a || ROLLBACK_OK=0
-    wait_ready doh-b || ROLLBACK_OK=0
-  fi
-
-  if [ "$ROLLBACK_OK" -eq 1 ]; then
-    echo "Rollback recovered both resolvers."
-  else
-    echo "WARNING: rollback did not fully recover both resolvers."
-    dump_service doh-a
-    dump_service doh-b
-  fi
-
-  echo "Deployment remains FAILED regardless of rollback outcome."
-  exit "$EXIT_CODE"
-}
-
-docker compose up -d --no-deps doh-a
-wait_ready doh-a || rollback_resolvers doh-a 21
-
-docker compose up -d --no-deps doh-b
-wait_ready doh-b || rollback_resolvers doh-b 22
-
-docker compose up -d --no-deps --force-recreate doh-proxy
-docker compose up -d --no-deps --force-recreate telegram-bot
-
-echo "== Scheduling verified updater self-replacement =="
-docker run --rm -d \
-  -e HOST_REPO_DIR="$HOST_REPO_DIR" \
-  -e EXPECTED_UPDATER_GENERATION="${runtimeGeneration}" \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$HOST_REPO_DIR:/workspace" \
-  -w /workspace \
-  adblock-general-purpose-updater:latest \
-  /replace-self.sh >/dev/null
-`;
-
-  const child = spawn("/bin/sh", ["-c", script], {
-    env: {
-      ...process.env,
-      GITHUB_TOKEN: githubToken ?? "",
-    },
+  persistUpdateState({
+    ...currentState,
+    running: true,
+    lastStartedAt: startedAt,
+    lastFinishedAt: null,
+    lastSuccess: null,
+    lastOutput: "Deployment helper starting...\n",
+    failedRemoteSha: null,
   });
 
-  child.stdout.on("data", chunk => {
-    lastOutput = tail(lastOutput + chunk.toString());
-    schedulePersistUpdateState();
-  });
+  try {
+    const hostRepoDir = await resolveHostRepoDir();
 
-  child.stderr.on("data", chunk => {
-    lastOutput = tail(lastOutput + chunk.toString());
-    schedulePersistUpdateState();
-  });
+    await execFileAsync("docker", ["rm", "-f", helperName], {
+      env: process.env,
+    }).catch(() => {});
 
-  child.on("close", code => {
-    running = false;
-    lastFinishedAt = new Date().toISOString();
-    lastSuccess = code === 0;
-    lastOutput = tail(lastOutput + `\nExit code: ${code}\n`);
-    persistUpdateState();
+    const { stdout } = await execFileAsync(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "-d",
+        "--name",
+        helperName,
+        "-e",
+        `HOST_REPO_DIR=${hostRepoDir}`,
+        "-e",
+        `GITHUB_TOKEN=${githubToken}`,
+        "-e",
+        `GIT_BRANCH=${branch}`,
+        "-e",
+        `COMPOSE_PROJECT_NAME=${composeProjectName}`,
+        "-e",
+        `UPDATER_STATE_FILE=${updaterStateFile}`,
+        "-e",
+        `UPDATER_LOG_FILE=${updaterLogFile}`,
+        "-e",
+        `DEPLOY_STARTED_AT=${startedAt}`,
+        "-e",
+        `TELEGRAM_BOT_TOKEN=${telegramToken ?? ""}`,
+        "-e",
+        `TELEGRAM_ALLOWED_USER_IDS=${telegramUserIds.join(",")}`,
+        "-v",
+        "/var/run/docker.sock:/var/run/docker.sock",
+        "-v",
+        `${hostRepoDir}:/workspace`,
+        "-v",
+        `${updaterDataVolume}:/updater-data`,
+        "-w",
+        "/workspace",
+        "adblock-general-purpose-updater:latest",
+        "/bootstrap-update.sh",
+      ],
+      {
+        cwd: repoDir,
+        env: process.env,
+      },
+    );
 
-    void (async () => {
-      if (code === 0) {
-        failedRemoteSha = null;
-        try {
-          lastSeenRemoteSha = await localSha();
-        } catch {}
-        persistUpdateState();
-        await notifyTelegram("✅ AdBlock aggiornato correttamente.");
-      } else {
-        try {
-          const { stdout } = await execFileAsync(
-            "git",
-            ["rev-parse", `origin/${branch}`],
-            { cwd: repoDir },
-          );
-          failedRemoteSha = stdout.trim();
-        } catch {}
-        persistUpdateState();
-        await notifyTelegram(
-          `❌ Aggiornamento AdBlock fallito. Il deploy è stato fermato. Usa /update_status per i dettagli. Exit code: ${code}`,
-        );
-      }
-    })();
-  });
+    const helperId = stdout.trim();
+
+    persistUpdateState({
+      ...loadUpdateState(),
+      running: true,
+      lastStartedAt: startedAt,
+      lastFinishedAt: null,
+      lastSuccess: null,
+      lastOutput: `Deployment helper started: ${helperId}\n`,
+      failedRemoteSha: null,
+    });
+
+    await notifyTelegram(
+      trigger === "automatic"
+        ? "🔄 Nuovo push su master rilevato. Aggiornamento AdBlock avviato."
+        : "🔄 Aggiornamento AdBlock avviato.",
+    );
+
+    return { started: true, helperId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const state = loadUpdateState();
+
+    persistUpdateState({
+      ...state,
+      running: false,
+      lastFinishedAt: new Date().toISOString(),
+      lastSuccess: false,
+      lastOutput: tail(state.lastOutput + `\nUnable to start deployment helper: ${message}\n`),
+    });
+
+    await notifyTelegram(
+      `❌ Impossibile avviare l'aggiornamento AdBlock: ${message}`,
+    );
+
+    throw error;
+  } finally {
+    launching = false;
+  }
 }
 
 async function checkForUpdates(): Promise<void> {
-  if (running) return;
+  if (launching) return;
+
+  await reconcileInterruptedDeployment();
+  const state = loadUpdateState();
+  if (state.running) return;
 
   try {
     const remote = await fetchRemoteSha();
     const local = await localSha();
 
-    if (!lastSeenRemoteSha) {
-      lastSeenRemoteSha = local;
-      persistUpdateState();
-    }
-
-    if (remote === failedRemoteSha) {
+    if (remote === state.failedRemoteSha) {
       app.log.warn({ remote }, "skipping-previously-failed-revision");
       return;
     }
 
     if (remote !== local) {
       app.log.info({ local, remote }, "new-master-revision-detected");
-      runUpdate("automatic");
-    } else {
-      lastSeenRemoteSha = remote;
-      schedulePersistUpdateState();
+      await launchDeployment("automatic");
+      return;
+    }
+
+    if (state.lastSeenRemoteSha !== remote) {
+      persistUpdateState({
+        ...state,
+        lastSeenRemoteSha: remote,
+      });
     }
   } catch (error) {
     app.log.error({ error }, "automatic-update-check-failed");
   }
 }
 
-app.get("/health", async () => ({ ok: true }));
+app.get("/health", async () => ({
+  ok: true,
+  runtimeGeneration,
+  runtimeBuildSha,
+}));
 
 app.get("/status", async (request, reply) => {
   if (!authorized(request, reply)) return;
 
+  await reconcileInterruptedDeployment();
+
   let currentSha: string | null = null;
-  try { currentSha = await localSha(); } catch {}
+  try {
+    currentSha = await localSha();
+  } catch {}
 
   const [dohA, dohB, proxy, telegram] = await Promise.all([
     serviceRuntimeState("doh-a"),
@@ -514,13 +462,16 @@ app.get("/status", async (request, reply) => {
     serviceRuntimeState("telegram-bot"),
   ]);
 
+  const state = liveUpdateState();
+
   return {
-    running,
+    ...state,
     autoUpdate: true,
     githubAuthConfigured: Boolean(githubToken),
     pollIntervalSec,
     statePersistent: true,
     runtimeGeneration,
+    runtimeBuildSha,
     runtimeStartedAt,
     currentSha,
     services: {
@@ -529,21 +480,33 @@ app.get("/status", async (request, reply) => {
       proxy,
       telegram,
     },
-    lastSeenRemoteSha,
-    failedRemoteSha,
-    lastStartedAt,
-    lastFinishedAt,
-    lastSuccess,
-    lastOutput,
   };
 });
 
 app.post("/update", async (request, reply) => {
   if (!authorized(request, reply)) return;
-  if (running) return reply.code(409).send({ error: "update already running" });
 
-  runUpdate("manual");
-  return reply.code(202).send({ ok: true, started: true });
+  const state = loadUpdateState();
+  if (state.running || launching) {
+    return reply.code(409).send({ error: "update already running" });
+  }
+
+  try {
+    const result = await launchDeployment("manual");
+    if (!result.started) {
+      return reply.code(409).send({ error: "update already running" });
+    }
+
+    return reply.code(202).send({
+      ok: true,
+      started: true,
+      helperId: result.helperId,
+    });
+  } catch (error) {
+    return reply.code(500).send({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 await app.listen({
@@ -551,8 +514,10 @@ await app.listen({
   port: Number(process.env.PORT ?? 8090),
 });
 
-setTimeout(() => void checkForUpdates(), 10_000);
+setTimeout(() => void reconcileInterruptedDeployment(), 15_000);
+setTimeout(() => void checkForUpdates(), 20_000);
 setTimeout(() => void refreshExternalBlocklists(), 60_000);
+
 setInterval(() => void checkForUpdates(), pollIntervalSec * 1000);
 setInterval(
   () => void refreshExternalBlocklists(),
