@@ -19,13 +19,13 @@ function read(file: string | undefined): Set<string> {
   return parse(fs.readFileSync(file, "utf8"));
 }
 
-function matches(host: string, rules: Set<string>): boolean {
+function findMatch(host: string, rules: Set<string>): string | null {
   let current = host;
 
   while (true) {
-    if (rules.has(current)) return true;
+    if (rules.has(current)) return current;
     const dot = current.indexOf(".");
-    if (dot === -1) return false;
+    if (dot === -1) return null;
     current = current.slice(dot + 1);
   }
 }
@@ -35,6 +35,12 @@ export type RuleDecisionSource =
   | "manual-block"
   | "external-block"
   | "default";
+
+export type RuleExplanation = {
+  decision: "allow" | "block";
+  source: RuleDecisionSource;
+  matchedRule: string | null;
+};
 
 export class RuleEngine {
   constructor(
@@ -55,28 +61,36 @@ export class RuleEngine {
     );
   }
 
+  explain(hostname: string): RuleExplanation {
+    const host = normalize(hostname);
+
+    const allowMatch = findMatch(host, this.manualAllowed);
+    if (allowMatch) {
+      return { decision: "allow", source: "manual-allow", matchedRule: allowMatch };
+    }
+
+    const manualBlockMatch = findMatch(host, this.manualBlocked);
+    if (manualBlockMatch) {
+      return { decision: "block", source: "manual-block", matchedRule: manualBlockMatch };
+    }
+
+    const externalBlockMatch = findMatch(host, this.externalBlocked);
+    if (externalBlockMatch) {
+      return { decision: "block", source: "external-block", matchedRule: externalBlockMatch };
+    }
+
+    return { decision: "allow", source: "default", matchedRule: null };
+  }
+
   decideDetailed(hostname: string): {
     decision: "allow" | "block";
     source: RuleDecisionSource;
   } {
-    const host = normalize(hostname);
-
-    if (matches(host, this.manualAllowed)) {
-      return { decision: "allow", source: "manual-allow" };
-    }
-
-    if (matches(host, this.manualBlocked)) {
-      return { decision: "block", source: "manual-block" };
-    }
-
-    if (matches(host, this.externalBlocked)) {
-      return { decision: "block", source: "external-block" };
-    }
-
-    return { decision: "allow", source: "default" };
+    const { decision, source } = this.explain(hostname);
+    return { decision, source };
   }
 
   decide(hostname: string): "allow" | "block" {
-    return this.decideDetailed(hostname).decision;
+    return this.explain(hostname).decision;
   }
 }
