@@ -203,9 +203,16 @@ function domainsListView(data: any) {
   };
 }
 
+function domainStateLabel(state: string): string {
+  if (state === "allow") return "Allow manuale";
+  if (state === "block") return "Block manuale";
+  if (state === "list") return "Blocklist";
+  return "Default";
+}
+
 function domainDetailView(item: any, page: number) {
   return {
-    text: `${stateIcon(item.state)} ${item.domain}\n\nQuery: ${item.count}\nStato: ${item.state}`,
+    text: `${stateIcon(item.state)} ${item.domain}\n\nQuery: ${item.count}\nStato: ${domainStateLabel(item.state)}`,
     reply_markup: {
       inline_keyboard: [
         [
@@ -612,7 +619,7 @@ bot.on("message", async msg => {
     if (text === "/status") {
       const status = await api("/admin/status");
       await sendTrackedMessage(chatId,
-        `DoH: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%`
+        `DoH: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nBlocklist: ${status.blocklists ?? 0}\nDomini esterni: ${status.externalBlockedDomains ?? 0}`
       );
       return;
     }
