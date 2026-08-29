@@ -1,3 +1,5 @@
+name: adblock-general-purpose
+
 x-doh-common: &doh-common
   build:
     context: .
@@ -11,7 +13,7 @@ x-doh-common: &doh-common
     PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
     ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
   volumes:
-    - ./rules:/rules
+    - ./data/rules:/rules
   healthcheck:
     test:
       - CMD
@@ -54,6 +56,22 @@ services:
     ports:
       - "8053:8053"
 
+  updater:
+    build:
+      context: .
+      dockerfile: updater/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 8090
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GIT_BRANCH: master
+      REPO_DIR: /workspace
+      COMPOSE_PROJECT_NAME: adblock-general-purpose
+    volumes:
+      - ./:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+
   telegram-bot:
     build:
       context: .
@@ -62,8 +80,11 @@ services:
     depends_on:
       doh-proxy:
         condition: service_started
+      updater:
+        condition: service_started
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
       ADMIN_API_BASE: http://doh-proxy:8053
+      UPDATER_API_BASE: http://updater:8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
