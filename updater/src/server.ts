@@ -223,16 +223,16 @@ done
 
 docker compose build updater doh-a doh-b telegram-bot debug-collector
 
-docker compose up -d --no-deps doh-a
+docker compose up -d doh-a
 for i in $(seq 1 30); do
-  docker compose exec -T doh-a node -e "fetch('http://127.0.0.1:8053/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" && break
+  docker compose exec -T doh-a node -e "fetch('http://127.0.0.1:8053/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" && break
   [ "$i" -eq 30 ] && exit 1
   sleep 1
 done
 
-docker compose up -d --no-deps doh-b
+docker compose up -d doh-b
 for i in $(seq 1 30); do
-  docker compose exec -T doh-b node -e "fetch('http://127.0.0.1:8053/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" && break
+  docker compose exec -T doh-b node -e "fetch('http://127.0.0.1:8053/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" && break
   [ "$i" -eq 30 ] && exit 1
   sleep 1
 done
