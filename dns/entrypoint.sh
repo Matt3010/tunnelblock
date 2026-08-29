@@ -11,16 +11,27 @@ if [ ! -f /rules/allow.txt ]; then
   cp /defaults/allow.txt /rules/allow.txt
 fi
 
-# One-time migration: remove the four legacy MVP seed rules from existing installs.
-# Preserve every other manual rule already stored in /rules/block.txt.
-MIGRATION_MARKER="/rules/.legacy-seed-v1-removed"
+# One-time v2 migration: remove the four legacy MVP seed rules from existing installs.
+# This also handles CRLF and surrounding whitespace. Every other manual rule is preserved.
+MIGRATION_MARKER="/rules/.legacy-seed-v2-removed"
 if [ ! -f "$MIGRATION_MARKER" ]; then
   TMP="/rules/block.txt.migrate.$$"
   awk '
-    $0 != "doubleclick.net" &&
-    $0 != "googleadservices.com" &&
-    $0 != "googlesyndication.com" &&
-    $0 != "app-measurement.com"
+    {
+      original = $0
+      normalized = $0
+      sub(/$/, "", normalized)
+      gsub(/^[ 	]+|[ 	]+$/, "", normalized)
+
+      if (
+        normalized != "doubleclick.net" &&
+        normalized != "googleadservices.com" &&
+        normalized != "googlesyndication.com" &&
+        normalized != "app-measurement.com"
+      ) {
+        print original
+      }
+    }
   ' /rules/block.txt > "$TMP"
   mv "$TMP" /rules/block.txt
   touch "$MIGRATION_MARKER"
