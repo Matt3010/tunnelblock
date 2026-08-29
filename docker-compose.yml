@@ -12,12 +12,10 @@ x-doh-common: &doh-common
     UPSTREAM_DNS_PORT: 53
     PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
     ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-    REDIS_URL: redis://redis:6379
+    STATS_DB_PATH: /stats/stats.sqlite
   volumes:
     - ${HOST_REPO_DIR:-.}/data/rules:/rules
-  depends_on:
-    redis:
-      condition: service_healthy
+    - stats-data:/stats
   healthcheck:
     test:
       - CMD
@@ -133,6 +131,8 @@ services:
       - telegram-data:/telegram-data
 
 volumes:
+  stats-data:
+    name: adblock-general-purpose-stats-data
   redis-data:
     name: adblock-general-purpose-redis-data
   telegram-data:
