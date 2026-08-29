@@ -16,7 +16,6 @@ https://adblock.scanferlamatteo.work/dns-query
 Raspberry Pi
   |
   +--> DoH resolver / rule engine
-  +--> debug collector
   +--> upstream DNS
 ```
 
@@ -30,13 +29,12 @@ No iOS app, no Xcode sideloading, no VPS and no inbound router ports are require
 - blocked DNS response generation
 - upstream DNS forwarding
 - iOS `.mobileconfig` template
-- Raspberry Pi debug collector
 - Docker deployment
 - IKEv2 code retained only as an alternative experiment
 
 ## Raspberry deployment
 
-Create a local `.env` containing the debug token, then:
+Create a local `.env` containing the required service secrets, then:
 
 ```bash
 docker compose up -d
@@ -47,7 +45,6 @@ Services:
 ```text
 DoH resolver:      http://raspberry:8053/dns-query
 DoH health:        http://raspberry:8053/health
-Debug collector:   http://raspberry:8787/events
 ```
 
 Configure Cloudflare Tunnel so:
@@ -55,7 +52,6 @@ Configure Cloudflare Tunnel so:
 ```text
 https://adblock.scanferlamatteo.work/dns-query -> http://localhost:8053/dns-query
 https://adblock.scanferlamatteo.work/health    -> http://localhost:8053/health
-https://adblock.scanferlamatteo.work/events    -> http://localhost:8787/events
 ```
 
 ## Generate iOS profile
@@ -77,3 +73,13 @@ Install that profile on the iPhone.
 DNS filtering can block many ad/tracker domains, but it cannot reliably distinguish YouTube ads from normal video traffic when both are served through shared Google infrastructure.
 
 The YouTube-specific work remains experimental.
+
+## Public endpoint boundary
+
+The public reverse proxy exposes only:
+
+- `/dns-query`
+- `/install`
+- `/health`
+
+Administrative endpoints under `/admin/*` remain reachable only inside the Docker network and are not forwarded by the public proxy.
