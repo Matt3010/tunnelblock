@@ -2,6 +2,7 @@ import TelegramBot from "node-telegram-bot-api";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const adminBase = process.env.ADMIN_API_BASE ?? "http://doh:8053";
+const updaterBase = process.env.UPDATER_API_BASE ?? "http://updater:8090";
 const adminToken = process.env.ADMIN_API_TOKEN;
 const allowed = new Set(
   (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
@@ -20,8 +21,8 @@ function isAllowed(userId?: number): boolean {
   return allowed.has(String(userId));
 }
 
-async function api(path: string, init?: RequestInit) {
-  const res = await fetch(`${adminBase}${path}`, {
+async function requestJson(base: string, path: string, init?: RequestInit) {
+  const res = await fetch(`${base}${path}`, {
     ...init,
     headers: {
       "content-type": "application/json",
@@ -41,6 +42,14 @@ async function api(path: string, init?: RequestInit) {
   return body as any;
 }
 
+async function api(path: string, init?: RequestInit) {
+  return requestJson(adminBase, path, init);
+}
+
+async function updaterApi(path: string, init?: RequestInit) {
+  return requestJson(updaterBase, path, init);
+}
+
 function helpText(): string {
   return [
     "AdBlock bot commands:",
@@ -54,6 +63,8 @@ function helpText(): string {
     "/unallow domain.com",
     "/reload",
     "/profile",
+    "/update",
+    "/update_status",
     "/help",
   ].join("\n");
 }
@@ -112,6 +123,22 @@ bot.on("message", async msg => {
 
     if (text === "/profile") {
       await bot.sendMessage(chatId, "https://adblock.scanferlamatteo.work/install");
+      return;
+    }
+
+    if (text === "/update") {
+      await updaterApi("/update", { method: "POST", body: "{}" });
+      await bot.sendMessage(chatId, "Update started. Use /update_status to follow progress.");
+      return;
+    }
+
+    if (text === "/update_status") {
+      const s = await updaterApi("/status");
+      const state = s.running ? "running" : (s.lastSuccess === true ? "success" : (s.lastSuccess === false ? "failed" : "idle"));
+      const output = typeof s.lastOutput === "string" ? s.lastOutput.slice(-2500) : "";
+      await bot.sendMessage(chatId,
+        `Update: ${state}\nStarted: ${s.lastStartedAt ?? "-"}\nFinished: ${s.lastFinishedAt ?? "-"}${output ? "\n\n" + output : ""}`
+      );
       return;
     }
 
