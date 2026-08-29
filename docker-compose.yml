@@ -9,3 +9,38 @@ services:
       DEBUG_TOKEN: ${DEBUG_TOKEN:-change-me}
     ports:
       - "8787:8787"
+
+  dns:
+    image: alpine:3.22
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        apk add --no-cache dnsmasq nodejs &&
+        node /workspace/dns/build-block-hosts.mjs &&
+        dnsmasq --no-daemon --conf-file=/workspace/dns/dnsmasq.conf
+    volumes:
+      - ./:/workspace:ro
+      - ./dns/block.hosts:/etc/adblock/block.hosts
+    network_mode: host
+
+  strongswan:
+    image: strongx509/strongswan:latest
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    network_mode: host
+    volumes:
+      - ./vpn/strongswan:/etc/swanctl:ro
+      - ./vpn/certs:/etc/swanctl/x509:ro
+      - ./vpn/private:/etc/swanctl/private:ro
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        swanctl --load-all &&
+        tail -f /dev/null
