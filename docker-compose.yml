@@ -20,5 +20,6 @@ services:
       PORT: 8053
       UPSTREAM_DNS_HOST: 1.1.1.1
       UPSTREAM_DNS_PORT: 53
+      PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
     ports:
       - "8053:8053"
