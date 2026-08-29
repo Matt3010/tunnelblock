@@ -16,6 +16,10 @@ RUN npm run typecheck
 COPY updater/replace-self.sh /replace-self.sh
 COPY updater/bootstrap-update.sh /bootstrap-update.sh
 COPY updater/update-state.mjs /update-state.mjs
-RUN chmod +x /replace-self.sh /bootstrap-update.sh /update-state.mjs
+COPY ops/deploy.sh /deploy-check.sh
+RUN sh -n /replace-self.sh /bootstrap-update.sh /deploy-check.sh \
+    && node --check /update-state.mjs \
+    && rm /deploy-check.sh \
+    && chmod +x /replace-self.sh /bootstrap-update.sh /update-state.mjs
 
 CMD ["npm", "start"]
