@@ -249,6 +249,16 @@ function runUpdate(trigger: "manual" | "automatic" = "manual") {
 set -eu
 cd "${repoDir}"
 
+# Git runs as root inside the updater container, but /workspace is a bind mount
+# owned by the host user. Preserve that ownership even when the deployment
+# fails midway, otherwise future host-side git commands lose write access.
+REPO_UID="$(stat -c '%u' "${repoDir}")"
+REPO_GID="$(stat -c '%g' "${repoDir}")"
+restore_repo_ownership() {
+  chown -R "$REPO_UID:$REPO_GID" "${repoDir}" 2>/dev/null || true
+}
+trap restore_repo_ownership EXIT
+
 git config --global --add safe.directory "${repoDir}"
 
 if [ -z "\${GITHUB_TOKEN:-}" ]; then
