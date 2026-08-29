@@ -66,12 +66,9 @@ function helpText(): string {
     "AdBlock bot commands:",
     "/status",
     "/stats",
+    "/domains",
     "/topblocked",
     "/topallowed",
-    "/block domain.com",
-    "/allow domain.com",
-    "/unblock domain.com",
-    "/unallow domain.com",
     "/reload",
     "/profile",
     "/update",
@@ -79,6 +76,59 @@ function helpText(): string {
     "/help",
   ].join("\n");
 }
+
+
+bot.on("callback_query", async query => {
+  const userId = query.from.id;
+  const chatId = query.message?.chat.id;
+  const data = query.data ?? "";
+
+  if (!chatId || !isAllowed(userId)) {
+    await bot.answerCallbackQuery(query.id, { text: "Unauthorized." });
+    return;
+  }
+
+  const match = data.match(/^rule:(allow|block):([a-f0-9]{16})$/);
+  if (!match) {
+    await bot.answerCallbackQuery(query.id, { text: "Invalid action." });
+    return;
+  }
+
+  const [, action, key] = match;
+
+  try {
+    const result = await api("/admin/rules/by-key", {
+      method: "POST",
+      body: JSON.stringify({ action, key }),
+    });
+
+    await bot.answerCallbackQuery(query.id, {
+      text: action === "allow" ? "Allowed" : "Blocked",
+    });
+
+    if (query.message) {
+      const icon = action === "allow" ? "✅" : "🚫";
+      await bot.editMessageText(
+        `${icon} ${result.domain}\nState: ${action}`,
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "✅ Allow", callback_data: `rule:allow:${key}` },
+              { text: "🚫 Block", callback_data: `rule:block:${key}` },
+            ]],
+          },
+        },
+      );
+    }
+  } catch (error) {
+    await bot.answerCallbackQuery(query.id, {
+      text: error instanceof Error ? error.message.slice(0, 180) : "Error",
+      show_alert: true,
+    });
+  }
+});
 
 bot.on("message", async msg => {
   const chatId = msg.chat.id;
@@ -109,6 +159,33 @@ bot.on("message", async msg => {
       await bot.sendMessage(chatId,
         `Queries: ${s.queries}\nAllowed: ${s.allowed}\nBlocked: ${s.blocked}\nBlock rate: ${s.blockRate}%`
       );
+      return;
+    }
+
+    if (text === "/domains") {
+      const s = await api("/admin/domains?limit=12");
+      const items = s.items ?? [];
+
+      if (!items.length) {
+        await bot.sendMessage(chatId, "No domains observed yet.");
+        return;
+      }
+
+      for (const item of items) {
+        const icon = item.state === "allow" ? "✅" : item.state === "block" ? "🚫" : "⚪";
+        await bot.sendMessage(
+          chatId,
+          `${icon} ${item.domain}\nQueries: ${item.count}\nState: ${item.state}`,
+          {
+            reply_markup: {
+              inline_keyboard: [[
+                { text: "✅ Allow", callback_data: `rule:allow:${item.key}` },
+                { text: "🚫 Block", callback_data: `rule:block:${item.key}` },
+              ]],
+            },
+          },
+        );
+      }
       return;
     }
 
@@ -150,17 +227,6 @@ bot.on("message", async msg => {
       await bot.sendMessage(chatId,
         `Update: ${state}\nStarted: ${s.lastStartedAt ?? "-"}\nFinished: ${s.lastFinishedAt ?? "-"}${output ? "\n\n" + output : ""}`
       );
-      return;
-    }
-
-    const ruleMatch = text.match(/^\/(block|allow|unblock|unallow)\s+([^\s]+)$/i);
-    if (ruleMatch) {
-      const [, action, domain] = ruleMatch;
-      await api("/admin/rules", {
-        method: "POST",
-        body: JSON.stringify({ action: action.toLowerCase(), domain }),
-      });
-      await bot.sendMessage(chatId, `${action.toLowerCase()} applied to ${domain}`);
       return;
     }
 
