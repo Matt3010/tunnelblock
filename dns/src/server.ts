@@ -298,13 +298,16 @@ app.get("/admin/status", async (request, reply) => {
 
   try {
     const stats = await getStats();
+    const listDiagnostics = blocklists.diagnostics();
     return {
       ok: true,
       uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
       statsStorage: "sqlite",
-      blocklists: blocklists.activeCount(),
-      configuredBlocklists: blocklists.list().length,
-      externalBlockedDomains: blocklists.combinedDomainCount(),
+      blocklists: listDiagnostics.activeCount,
+      configuredBlocklists: listDiagnostics.configuredCount,
+      externalBlockedDomains: listDiagnostics.combinedDomainCount,
+      blocklistDuplicateEntries: listDiagnostics.duplicateEntries,
+      blocklistErrors: listDiagnostics.unhealthyCount,
       ...stats,
     };
   } catch (error) {
