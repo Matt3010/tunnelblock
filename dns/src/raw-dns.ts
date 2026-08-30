@@ -97,7 +97,8 @@ export async function startRawDnsServer(options: {
     let chain = Promise.resolve();
 
     socket.on("data", chunk => {
-      pending = Buffer.concat([pending, chunk]);
+      const data = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      pending = Buffer.concat([pending, data]);
       const decoded = decodeTcpDnsFrames(pending);
       pending = decoded.remainder;
 
