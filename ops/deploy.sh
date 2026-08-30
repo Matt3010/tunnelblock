@@ -94,6 +94,7 @@ verify_stack() {
   wait_service updater healthy || return 1
   wait_service doh-proxy running || return 1
   wait_service telegram-bot running || return 1
+  wait_service wireguard healthy || return 1
 
   for i in $(seq 1 30); do
     if verify_updater_revision "$EXPECTED_SHA"; then
@@ -116,6 +117,9 @@ deploy_target() (
 
   log "== Pre-flight: build complete stack =="
   docker compose build >>"$LOG_FILE" 2>&1
+
+  log "== Pre-flight: WireGuard shell checks =="
+  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh scripts/wireguard-client.sh >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: DNS tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1

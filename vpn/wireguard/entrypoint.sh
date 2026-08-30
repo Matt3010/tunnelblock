@@ -1,0 +1,248 @@
+#!/bin/sh
+set -eu
+
+umask 077
+
+CONFIG_DIR="${WG_CONFIG_DIR:-/config}"
+CLIENT_NAME="${WG_CLIENT_NAME:-iphone}"
+SERVER_PORT="${WG_SERVER_PORT:-51820}"
+SERVER_IPV4_ADDRESS="${WG_SERVER_IPV4_ADDRESS:-10.66.66.1/24}"
+SERVER_IPV6_ADDRESS="${WG_SERVER_IPV6_ADDRESS:-fd42:66:66::1/64}"
+CLIENT_IPV4_ADDRESS="${WG_CLIENT_IPV4_ADDRESS:-10.66.66.2/32}"
+CLIENT_IPV6_ADDRESS="${WG_CLIENT_IPV6_ADDRESS:-fd42:66:66::2/128}"
+IPV4_SUBNET="${WG_IPV4_SUBNET:-10.66.66.0/24}"
+IPV6_SUBNET="${WG_IPV6_SUBNET:-fd42:66:66::/64}"
+ALLOWED_IPS="${WG_ALLOWED_IPS:-0.0.0.0/0, ::/0}"
+DNS_SERVERS="${WG_DNS_SERVERS:-10.66.66.1}"
+DNS_UPSTREAMS="${WG_DNS_UPSTREAMS:-doh-a,doh-b}"
+MTU="${WG_MTU:-1420}"
+
+case "$CLIENT_NAME" in
+  ""|*[!A-Za-z0-9_-]*)
+    echo "Invalid WG_CLIENT_NAME" >&2
+    exit 2
+    ;;
+esac
+
+mkdir -p "$CONFIG_DIR/peers/$CLIENT_NAME"
+chmod 0700 "$CONFIG_DIR" "$CONFIG_DIR/peers" "$CONFIG_DIR/peers/$CLIENT_NAME"
+
+SERVER_PRIVATE="$CONFIG_DIR/server_private.key"
+SERVER_PUBLIC="$CONFIG_DIR/server_public.key"
+CLIENT_PRIVATE="$CONFIG_DIR/peers/$CLIENT_NAME/private.key"
+CLIENT_PUBLIC="$CONFIG_DIR/peers/$CLIENT_NAME/public.key"
+PRESHARED_KEY="$CONFIG_DIR/peers/$CLIENT_NAME/preshared.key"
+SERVER_CONF="$CONFIG_DIR/wg0.conf"
+CLIENT_CONF="$CONFIG_DIR/peers/$CLIENT_NAME/$CLIENT_NAME.conf"
+CLIENT_QR="$CONFIG_DIR/peers/$CLIENT_NAME/$CLIENT_NAME.png"
+
+generate_keypair() {
+  PRIVATE_FILE="$1"
+  PUBLIC_FILE="$2"
+
+  if [ ! -s "$PRIVATE_FILE" ]; then
+    wg genkey >"$PRIVATE_FILE"
+  fi
+
+  # Public keys are derived state: refresh them from the persisted private key
+  # on every start without ever rotating the private key itself.
+  wg pubkey <"$PRIVATE_FILE" >"$PUBLIC_FILE"
+  chmod 0600 "$PRIVATE_FILE" "$PUBLIC_FILE"
+}
+
+generate_keypair "$SERVER_PRIVATE" "$SERVER_PUBLIC"
+generate_keypair "$CLIENT_PRIVATE" "$CLIENT_PUBLIC"
+
+if [ ! -s "$PRESHARED_KEY" ]; then
+  wg genpsk >"$PRESHARED_KEY"
+fi
+chmod 0600 "$PRESHARED_KEY"
+
+resolve_public_ipv4() {
+  for URL in "https://api.ipify.org" "https://icanhazip.com"; do
+    VALUE="$(curl -4 -fsS --connect-timeout 3 --max-time 5 "$URL" 2>/dev/null | tr -d '[:space:]' || true)"
+    if printf '%s' "$VALUE" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+      printf '%s' "$VALUE"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ENDPOINT_HOST="${WG_SERVER_ENDPOINT:-auto}"
+if [ "$ENDPOINT_HOST" = "auto" ]; then
+  ENDPOINT_HOST="$(resolve_public_ipv4)" || {
+    echo "Unable to determine public IPv4. Set WG_SERVER_ENDPOINT in .env." >&2
+    exit 3
+  }
+fi
+
+case "$ENDPOINT_HOST" in
+  \[*\])
+    FORMATTED_ENDPOINT="$ENDPOINT_HOST"
+    ;;
+  *:*)
+    FORMATTED_ENDPOINT="[$ENDPOINT_HOST]"
+    ;;
+  *)
+    FORMATTED_ENDPOINT="$ENDPOINT_HOST"
+    ;;
+esac
+
+cat >"$SERVER_CONF" <<EOF
+[Interface]
+PrivateKey = $(cat "$SERVER_PRIVATE")
+ListenPort = $SERVER_PORT
+
+[Peer]
+PublicKey = $(cat "$CLIENT_PUBLIC")
+PresharedKey = $(cat "$PRESHARED_KEY")
+AllowedIPs = $CLIENT_IPV4_ADDRESS, $CLIENT_IPV6_ADDRESS
+EOF
+chmod 0600 "$SERVER_CONF"
+
+cat >"$CLIENT_CONF" <<EOF
+[Interface]
+PrivateKey = $(cat "$CLIENT_PRIVATE")
+Address = $CLIENT_IPV4_ADDRESS, $CLIENT_IPV6_ADDRESS
+DNS = $DNS_SERVERS
+MTU = $MTU
+
+[Peer]
+PublicKey = $(cat "$SERVER_PUBLIC")
+PresharedKey = $(cat "$PRESHARED_KEY")
+Endpoint = $FORMATTED_ENDPOINT:$SERVER_PORT
+AllowedIPs = $ALLOWED_IPS
+PersistentKeepalive = 25
+EOF
+chmod 0600 "$CLIENT_CONF"
+
+qrencode -o "$CLIENT_QR" -t PNG <"$CLIENT_CONF"
+chmod 0600 "$CLIENT_QR"
+
+ip link del wg0 2>/dev/null || true
+if ! ip link add dev wg0 type wireguard 2>/dev/null; then
+  modprobe wireguard 2>/dev/null || true
+  ip link add dev wg0 type wireguard
+fi
+
+wg setconf wg0 "$SERVER_CONF"
+ip address add "$SERVER_IPV4_ADDRESS" dev wg0
+IPV6_INTERFACE=0
+if ip -6 address add "$SERVER_IPV6_ADDRESS" dev wg0 2>/dev/null; then
+  IPV6_INTERFACE=1
+else
+  echo "IPv6 interface addressing unavailable; IPv6 will remain captured but without egress." >&2
+fi
+ip link set mtu "$MTU" up dev wg0
+
+EGRESS_IF="$(ip route get 1.1.1.1 | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+if [ -z "$EGRESS_IF" ]; then
+  echo "Unable to determine IPv4 egress interface" >&2
+  exit 4
+fi
+
+# This namespace is a dedicated Internet gateway. Default-deny forwarding prevents
+# the VPN peer from pivoting into vpn-dns or any other Docker-attached network.
+iptables -P FORWARD DROP
+iptables -A FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT
+iptables -A FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -t nat -A POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE
+
+IPV6_FIREWALL=0
+IPV6_EGRESS_IF=""
+IPV6_NAT=0
+
+if [ "$IPV6_INTERFACE" -eq 1 ] && ip6tables -P FORWARD DROP 2>/dev/null; then
+  IPV6_FIREWALL=1
+
+  if IPV6_ROUTE="$(ip -6 route get 2606:4700:4700::1111 2>/dev/null)"; then
+    IPV6_EGRESS_IF="$(printf '%s\n' "$IPV6_ROUTE" | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  fi
+
+  if [ -n "$IPV6_EGRESS_IF" ]; then
+    ip6tables -A FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT
+    ip6tables -A FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    if ip6tables -t nat -A POSTROUTING -s "$IPV6_SUBNET" -o "$IPV6_EGRESS_IF" -j MASQUERADE 2>/dev/null; then
+      IPV6_NAT=1
+    else
+      echo "IPv6 NAT is unavailable; ::/0 still prevents an IPv6 bypass." >&2
+    fi
+  else
+    echo "No IPv6 egress route; ::/0 still prevents an IPv6 bypass." >&2
+  fi
+else
+  # IPv4 must remain usable even on hosts where IPv6/netfilter is unavailable.
+  # Keep ::/0 in the client so native phone IPv6 cannot bypass the VPN.
+  printf '0' >/proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
+  echo "IPv6 forwarding unavailable; IPv6 remains captured and IPv4 stays operational." >&2
+fi
+
+resolve_dns_upstream() {
+  NAME="$1"
+
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    ADDRESS="$(getent hosts "$NAME" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
+    if [ -n "$ADDRESS" ] && ! printf '%s' "$ADDRESS" | grep -q ':'; then
+      printf '%s' "$ADDRESS"
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+DNSMASQ_CONF="/run/dnsmasq.conf"
+{
+  echo "port=53"
+  echo "no-resolv"
+  echo "no-hosts"
+  echo "bind-interfaces"
+  echo "interface=wg0"
+  echo "listen-address=${SERVER_IPV4_ADDRESS%/*}"
+  echo "cache-size=1000"
+  echo "strict-order"
+} >"$DNSMASQ_CONF"
+
+OLD_IFS="$IFS"
+IFS=','
+for UPSTREAM in $DNS_UPSTREAMS; do
+  IFS="$OLD_IFS"
+  UPSTREAM="$(printf '%s' "$UPSTREAM" | tr -d ' ')"
+  [ -n "$UPSTREAM" ] || continue
+  UPSTREAM_IP="$(resolve_dns_upstream "$UPSTREAM")" || {
+    echo "Unable to resolve DNS upstream service: $UPSTREAM" >&2
+    exit 5
+  }
+  echo "server=$UPSTREAM_IP#53" >>"$DNSMASQ_CONF"
+  IFS=','
+done
+IFS="$OLD_IFS"
+
+cleanup() {
+  set +e
+  [ -n "${DNSMASQ_PID:-}" ] && kill "$DNSMASQ_PID" 2>/dev/null
+  iptables -D FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT 2>/dev/null
+  iptables -D FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
+  iptables -t nat -D POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE 2>/dev/null
+  iptables -P FORWARD ACCEPT 2>/dev/null
+
+  if [ "$IPV6_FIREWALL" -eq 1 ]; then
+    if [ -n "$IPV6_EGRESS_IF" ]; then
+      ip6tables -D FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT 2>/dev/null
+      ip6tables -D FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
+      if [ "$IPV6_NAT" -eq 1 ]; then
+        ip6tables -t nat -D POSTROUTING -s "$IPV6_SUBNET" -o "$IPV6_EGRESS_IF" -j MASQUERADE 2>/dev/null
+      fi
+    fi
+    ip6tables -P FORWARD ACCEPT 2>/dev/null
+  fi
+  ip link del wg0 2>/dev/null
+}
+trap cleanup INT TERM EXIT
+
+echo "WireGuard ready on UDP $SERVER_PORT; client material persisted under /config/peers/$CLIENT_NAME."
+dnsmasq --keep-in-foreground --conf-file="$DNSMASQ_CONF" &
+DNSMASQ_PID="$!"
+wait "$DNSMASQ_PID"

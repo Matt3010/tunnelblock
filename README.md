@@ -1,103 +1,106 @@
 # adblock-general-purpose
 
-Experimental app-less iOS ad blocker using DNS-over-HTTPS.
+Self-hosted iOS ad-blocking stack running on a Raspberry Pi.
 
-## Primary architecture
+The primary client path is now a WireGuard **full tunnel**. The existing public DNS-over-HTTPS endpoint remains available and is not replaced by the VPN.
+
+## Architecture
 
 ```text
 iPhone
   |
-  | managed DoH profile
+  | WireGuard
+  | AllowedIPs = 0.0.0.0/0, ::/0
   v
+home router
+  |
+  | UDP 51820
+  v
+Raspberry Pi / Docker
+  |
+  +--> wireguard gateway
+  |      +--> NAT / Internet egress
+  |      +--> local VPN DNS 10.66.66.1:53
+  |               |
+  |               +--> doh-a:53
+  |               +--> doh-b:53
+  |
+  +--> doh-a + doh-b
+  |      +--> shared allow/block rules
+  |      +--> shared persistent SQLite statistics
+  |
+  +--> doh-proxy
+  |      +--> public /dns-query, /install, /health only
+  |
+  +--> updater
+  +--> telegram-bot
+```
+
+The WireGuard container is isolated from updater, Telegram and admin-only service endpoints. It reaches only the resolver replicas through an internal Docker network and the Internet through a separate egress network.
+
+## Persistent state
+
+Mutable data stays outside Git:
+
+```text
+data/rules/
+data/wireguard/
+```
+
+SQLite, updater state and Telegram state use named Docker volumes.
+
+WireGuard server/client private keys, the preshared key, generated client configuration and QR image are created at runtime under `data/wireguard/`. Existing files are reused, so `docker compose up -d --force-recreate` and automatic updates do not rotate keys.
+
+Never use `docker compose down -v` as part of normal deployment or recovery.
+
+## Existing public DoH
+
+The current endpoint remains:
+
+```text
 https://adblock.scanferlamatteo.work/dns-query
-  |
-  | Cloudflare Tunnel
-  v
-Raspberry Pi
-  |
-  +--> DoH resolver / rule engine
-  +--> upstream DNS
 ```
 
-No iOS app, no Xcode sideloading, no VPS and no inbound router ports are required.
-
-## Current MVP
-
-- DoH endpoint at `/dns-query`
-- domain allow/block engine
-- DNS packet parser
-- blocked DNS response generation
-- upstream DNS forwarding
-- iOS `.mobileconfig` template
-- Docker deployment
-- IKEv2 code retained only as an alternative experiment
-
-## Raspberry deployment
-
-Create a local `.env` containing the required service secrets, then:
-
-```bash
-docker compose up -d
-```
-
-Services:
-
-```text
-DoH resolver:      http://raspberry:8053/dns-query
-DoH health:        http://raspberry:8053/health
-```
-
-Configure Cloudflare Tunnel so:
-
-```text
-https://adblock.scanferlamatteo.work/dns-query -> http://localhost:8053/dns-query
-https://adblock.scanferlamatteo.work/health    -> http://localhost:8053/health
-```
-
-## Generate iOS profile
-
-```bash
-node scripts/generate-doh-profile.mjs
-```
-
-This creates:
-
-```text
-profiles/adblock-doh.mobileconfig
-```
-
-Install that profile on the iPhone.
-
-## Limitation
-
-DNS filtering can block many ad/tracker domains, but it cannot reliably distinguish YouTube ads from normal video traffic when both are served through shared Google infrastructure.
-
-The YouTube-specific work remains experimental.
-
-## Public endpoint boundary
-
-The public reverse proxy exposes only:
+Cloudflare Tunnel continues to terminate the public path and Caddy exposes only:
 
 - `/dns-query`
 - `/install`
 - `/health`
 
-Only the authenticated `/admin/*` endpoints required by the Telegram bot and updater remain available on the Docker network. The public proxy does not forward them.
+Admin endpoints remain Docker-internal.
 
+## WireGuard Phase 1
 
-## Self-updating deployment
+Phase 1 provides only:
 
-The updater is only the trigger. It does not keep the deployment procedure in memory.
+- full-tunnel WireGuard for IPv4 and captured IPv6;
+- NAT/forwarding through the Raspberry;
+- VPN DNS routed through the existing rule engine;
+- persistent keys/configuration;
+- iPhone client configuration and QR generation;
+- health checking and updater integration.
 
-On a manual `/update` or when a new `master` SHA is detected:
+It does **not** implement HTTPS/TLS interception, a private CA, transparent proxying, QUIC blocking or YouTube request-level filtering.
 
-1. the updater starts a temporary deployment helper;
-2. the helper fetches and resets the repository to the current `origin/master`;
-3. the helper executes `ops/deploy.sh` from that fresh checkout;
-4. the complete Compose stack is built;
-5. DNS tests and TypeScript checks run before runtime containers are changed;
-6. the complete stack is recreated with orphan cleanup;
-7. the updater is verified by its baked-in `runtimeBuildSha`;
-8. failures trigger a rebuild/recreate rollback to the previous SHA.
+See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup, iPhone import and verification.
 
-Deployment state and logs live in the persistent updater data volume, so replacing the updater container does not lose `/update_status` state.
+## Deployment
+
+The updater watches `master`. A deployment runs the current `ops/deploy.sh`, which:
+
+1. validates the Compose configuration;
+2. builds the complete stack;
+3. syntax-checks WireGuard scripts;
+4. runs DNS tests;
+5. runs TypeScript checks for DNS, Telegram and updater;
+6. recreates the stack only after pre-flight checks pass;
+7. verifies service health and updater revision;
+8. rolls back to the previous SHA if deployment fails.
+
+Persistent data is not reset during this process.
+
+## YouTube
+
+DNS-only filtering cannot safely distinguish YouTube ads from normal video delivery when both use shared Google infrastructure.
+
+The existing DNS capture tooling is retained for diagnostics, but the next YouTube phase is explicitly measurement-first: transparent HTTPS interception will only be considered after a go/no-go test for TLS interception, certificate pinning and QUIC behavior. No claim is made that the official YouTube iOS app can be filtered at request level until that is demonstrated.
