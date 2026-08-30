@@ -138,9 +138,14 @@ if [ -z "$EGRESS_IF" ]; then
   exit 4
 fi
 
+# This namespace is a dedicated Internet gateway. Default-deny forwarding prevents
+# the VPN peer from pivoting into vpn-dns or any other Docker-attached network.
+iptables -P FORWARD DROP
 iptables -A FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT
 iptables -A FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables -t nat -A POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE
+
+ip6tables -P FORWARD DROP
 
 IPV6_EGRESS_IF=""
 IPV6_NAT=0
@@ -208,6 +213,7 @@ cleanup() {
   iptables -D FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT 2>/dev/null
   iptables -D FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
   iptables -t nat -D POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE 2>/dev/null
+  iptables -P FORWARD ACCEPT 2>/dev/null
 
   if [ -n "$IPV6_EGRESS_IF" ]; then
     ip6tables -D FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT 2>/dev/null
@@ -217,6 +223,7 @@ cleanup() {
     fi
   fi
 
+  ip6tables -P FORWARD ACCEPT 2>/dev/null
   ip link del wg0 2>/dev/null
 }
 trap cleanup INT TERM EXIT
