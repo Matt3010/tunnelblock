@@ -44,10 +44,9 @@ generate_keypair() {
     wg genkey >"$PRIVATE_FILE"
   fi
 
-  if [ ! -s "$PUBLIC_FILE" ]; then
-    wg pubkey <"$PRIVATE_FILE" >"$PUBLIC_FILE"
-  fi
-
+  # Public keys are derived state: refresh them from the persisted private key
+  # on every start without ever rotating the private key itself.
+  wg pubkey <"$PRIVATE_FILE" >"$PUBLIC_FILE"
   chmod 0600 "$PRIVATE_FILE" "$PUBLIC_FILE"
 }
 
@@ -129,7 +128,12 @@ fi
 
 wg setconf wg0 "$SERVER_CONF"
 ip address add "$SERVER_IPV4_ADDRESS" dev wg0
-ip -6 address add "$SERVER_IPV6_ADDRESS" dev wg0
+IPV6_INTERFACE=0
+if ip -6 address add "$SERVER_IPV6_ADDRESS" dev wg0 2>/dev/null; then
+  IPV6_INTERFACE=1
+else
+  echo "IPv6 interface addressing unavailable; IPv6 will remain captured but without egress." >&2
+fi
 ip link set mtu "$MTU" up dev wg0
 
 EGRESS_IF="$(ip route get 1.1.1.1 | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
@@ -145,24 +149,33 @@ iptables -A FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT
 iptables -A FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables -t nat -A POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE
 
-ip6tables -P FORWARD DROP
-
+IPV6_FIREWALL=0
 IPV6_EGRESS_IF=""
 IPV6_NAT=0
-if IPV6_ROUTE="$(ip -6 route get 2606:4700:4700::1111 2>/dev/null)"; then
-  IPV6_EGRESS_IF="$(printf '%s\n' "$IPV6_ROUTE" | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
-fi
 
-if [ -n "$IPV6_EGRESS_IF" ]; then
-  ip6tables -A FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT
-  ip6tables -A FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-  if ip6tables -t nat -A POSTROUTING -s "$IPV6_SUBNET" -o "$IPV6_EGRESS_IF" -j MASQUERADE 2>/dev/null; then
-    IPV6_NAT=1
+if [ "$IPV6_INTERFACE" -eq 1 ] && ip6tables -P FORWARD DROP 2>/dev/null; then
+  IPV6_FIREWALL=1
+
+  if IPV6_ROUTE="$(ip -6 route get 2606:4700:4700::1111 2>/dev/null)"; then
+    IPV6_EGRESS_IF="$(printf '%s\n' "$IPV6_ROUTE" | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  fi
+
+  if [ -n "$IPV6_EGRESS_IF" ]; then
+    ip6tables -A FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT
+    ip6tables -A FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    if ip6tables -t nat -A POSTROUTING -s "$IPV6_SUBNET" -o "$IPV6_EGRESS_IF" -j MASQUERADE 2>/dev/null; then
+      IPV6_NAT=1
+    else
+      echo "IPv6 NAT is unavailable; ::/0 still prevents an IPv6 bypass." >&2
+    fi
   else
-    echo "IPv6 NAT is unavailable; ::/0 still prevents an IPv6 bypass." >&2
+    echo "No IPv6 egress route; ::/0 still prevents an IPv6 bypass." >&2
   fi
 else
-  echo "No IPv6 egress route; ::/0 still prevents an IPv6 bypass." >&2
+  # IPv4 must remain usable even on hosts where IPv6/netfilter is unavailable.
+  # Keep ::/0 in the client so native phone IPv6 cannot bypass the VPN.
+  printf '0' >/proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
+  echo "IPv6 forwarding unavailable; IPv6 remains captured and IPv4 stays operational." >&2
 fi
 
 resolve_dns_upstream() {
@@ -215,15 +228,16 @@ cleanup() {
   iptables -t nat -D POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE 2>/dev/null
   iptables -P FORWARD ACCEPT 2>/dev/null
 
-  if [ -n "$IPV6_EGRESS_IF" ]; then
-    ip6tables -D FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT 2>/dev/null
-    ip6tables -D FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
-    if [ "$IPV6_NAT" -eq 1 ]; then
-      ip6tables -t nat -D POSTROUTING -s "$IPV6_SUBNET" -o "$IPV6_EGRESS_IF" -j MASQUERADE 2>/dev/null
+  if [ "$IPV6_FIREWALL" -eq 1 ]; then
+    if [ -n "$IPV6_EGRESS_IF" ]; then
+      ip6tables -D FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT 2>/dev/null
+      ip6tables -D FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
+      if [ "$IPV6_NAT" -eq 1 ]; then
+        ip6tables -t nat -D POSTROUTING -s "$IPV6_SUBNET" -o "$IPV6_EGRESS_IF" -j MASQUERADE 2>/dev/null
+      fi
     fi
+    ip6tables -P FORWARD ACCEPT 2>/dev/null
   fi
-
-  ip6tables -P FORWARD ACCEPT 2>/dev/null
   ip link del wg0 2>/dev/null
 }
 trap cleanup INT TERM EXIT
