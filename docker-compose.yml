@@ -8,6 +8,8 @@ x-doh-common: &doh-common
   environment:
     HOST: 0.0.0.0
     PORT: 8053
+    DNS_HOST: 0.0.0.0
+    DNS_PORT: 53
     UPSTREAM_DNS_HOST: 1.1.1.1
     UPSTREAM_DNS_PORT: 53
     PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
@@ -30,9 +32,15 @@ x-doh-common: &doh-common
 services:
   doh-a:
     <<: *doh-common
+    networks:
+      - default
+      - vpn-dns
 
   doh-b:
     <<: *doh-common
+    networks:
+      - default
+      - vpn-dns
 
   doh-proxy:
     build:
@@ -46,6 +54,53 @@ services:
         condition: service_healthy
     ports:
       - "8053:8053"
+
+  wireguard:
+    build:
+      context: .
+      dockerfile: vpn/wireguard/Dockerfile
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    depends_on:
+      doh-a:
+        condition: service_healthy
+      doh-b:
+        condition: service_healthy
+    environment:
+      WG_SERVER_ENDPOINT: ${WG_SERVER_ENDPOINT:-auto}
+      WG_SERVER_PORT: 51820
+      WG_CLIENT_NAME: iphone
+      WG_SERVER_IPV4_ADDRESS: 10.66.66.1/24
+      WG_SERVER_IPV6_ADDRESS: fd42:66:66::1/64
+      WG_CLIENT_IPV4_ADDRESS: 10.66.66.2/32
+      WG_CLIENT_IPV6_ADDRESS: fd42:66:66::2/128
+      WG_IPV4_SUBNET: 10.66.66.0/24
+      WG_IPV6_SUBNET: fd42:66:66::/64
+      WG_ALLOWED_IPS: 0.0.0.0/0, ::/0
+      WG_DNS_SERVERS: 10.66.66.1
+      WG_DNS_UPSTREAMS: doh-a,doh-b
+      WG_MTU: 1420
+    volumes:
+      - ${HOST_REPO_DIR:-.}/data/wireguard:/config
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "51820:51820/udp"
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv6.conf.all.forwarding: "1"
+    networks:
+      - vpn-egress
+      - vpn-dns
+    healthcheck:
+      test:
+        - CMD
+        - /app/healthcheck.sh
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   updater:
     image: adblock-general-purpose-updater:latest
@@ -106,6 +161,12 @@ services:
       BOT_RUNTIME_GENERATION: "2"
     volumes:
       - telegram-data:/telegram-data
+
+networks:
+  vpn-egress:
+    enable_ipv6: true
+  vpn-dns:
+    internal: true
 
 volumes:
   stats-data:

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
+import { startRawDnsServer } from "./raw-dns.js";
 import { parseQuestion, buildBlockedResponse } from "./dns.js";
 import { RuleEngine } from "./rules.js";
 import { BlocklistManager } from "./lists.js";
@@ -568,7 +569,21 @@ app.route({
   }
 });
 
+const httpHost = process.env.HOST ?? "0.0.0.0";
+const httpPort = Number(process.env.PORT ?? 8053);
+
 await app.listen({
-  host: process.env.HOST ?? "0.0.0.0",
-  port: Number(process.env.PORT ?? 8053),
+  host: httpHost,
+  port: httpPort,
 });
+
+const rawDnsPort = Number(process.env.DNS_PORT ?? 0);
+if (rawDnsPort > 0) {
+  const rawDnsHost = process.env.DNS_HOST ?? "0.0.0.0";
+  await startRawDnsServer({
+    host: rawDnsHost,
+    port: rawDnsPort,
+    resolve: resolveDns,
+    logger: app.log,
+  });
+}
