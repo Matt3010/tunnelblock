@@ -149,18 +149,18 @@ def enclosing_length_delimited_fields(
     return sorted(nearest.items(), key=lambda item: (item[1], item[0]))
 
 
-def _ancestor_chain(
+def _ancestor_chain_details(
     candidates: list[CandidateDetail],
     max_depth: int = MAX_ANCESTOR_DEPTH,
-) -> tuple[int, ...]:
-    """Return the nearest properly nested field chain, leaf first."""
+) -> tuple[CandidateDetail, ...]:
+    """Return the nearest properly nested candidate chain, leaf first."""
 
     if not candidates or max_depth <= 0:
         return ()
 
     ordered = sorted(candidates, key=lambda item: (item[1], item[0], item[2]))
     current = ordered[0]
-    chain = [current[0]]
+    chain = [current]
 
     while len(chain) < max_depth:
         outer = [
@@ -175,10 +175,22 @@ def _ancestor_chain(
         if not outer:
             break
         parent = min(outer, key=lambda item: (item[1], item[0], item[2]))
-        chain.append(parent[0])
+        chain.append(parent)
         current = parent
 
     return tuple(chain)
+
+
+def _ancestor_chain(
+    candidates: list[CandidateDetail],
+    max_depth: int = MAX_ANCESTOR_DEPTH,
+) -> tuple[int, ...]:
+    """Return the nearest properly nested field-number chain, leaf first."""
+
+    return tuple(
+        candidate[0]
+        for candidate in _ancestor_chain_details(candidates, max_depth)
+    )
 
 
 def _distance_stats(
@@ -282,6 +294,9 @@ class ProtobufStreamScanner:
         marker_distance_min: dict[str, dict[int, int]] = {}
         marker_distance_max: dict[str, dict[int, int]] = {}
         ancestor_chains: dict[str, Counter[str]] = {}
+        chain_observations: list[
+            tuple[str, tuple[CandidateDetail, ...]]
+        ] = []
 
         def record_distance(
             marker_name: str,
@@ -346,9 +361,13 @@ class ProtobufStreamScanner:
             field_number, distance = fields[0]
             record_distance(marker_name, field_number, distance)
 
-            chain = _ancestor_chain(valid)
-            if chain:
-                chain_key = ">".join(str(field) for field in chain)
+            chain_details = _ancestor_chain_details(valid)
+            if chain_details:
+                chain_observations.append((marker_name, chain_details))
+                chain_key = ">".join(
+                    str(candidate[0])
+                    for candidate in chain_details
+                )
                 ancestor_chains.setdefault(marker_name, Counter())[
                     chain_key
                 ] += 1
@@ -396,6 +415,118 @@ class ProtobufStreamScanner:
             for marker, chains in sorted(ancestor_chains.items())
         }
 
+        node_markers: dict[
+            tuple[int, int, int, int],
+            Counter[str],
+        ] = {}
+        node_depths: dict[
+            tuple[int, int, int, int],
+            dict[str, Counter[int]],
+        ] = {}
+        for marker_name, chain_details in chain_observations:
+            for depth, candidate in enumerate(chain_details):
+                field, _distance, tag_pos, payload_start, payload_end = (
+                    candidate
+                )
+                node_id = (
+                    field,
+                    tag_pos,
+                    payload_start,
+                    payload_end,
+                )
+                node_markers.setdefault(node_id, Counter())[
+                    marker_name
+                ] += 1
+                node_depths.setdefault(node_id, {}).setdefault(
+                    marker_name,
+                    Counter(),
+                )[depth] += 1
+
+        shared_fields: dict[int, dict[str, object]] = {}
+        for node_id, marker_hits in node_markers.items():
+            if len(marker_hits) < 2:
+                continue
+
+            field, _tag_pos, payload_start, payload_end = node_id
+            payload_bytes = max(0, payload_end - payload_start)
+            state = shared_fields.setdefault(
+                field,
+                {
+                    "nodes": 0,
+                    "marker_hits": Counter(),
+                    "depths": {},
+                    "payload_total": 0,
+                    "payload_min": None,
+                    "payload_max": None,
+                },
+            )
+            state["nodes"] = int(state["nodes"]) + 1
+            state["payload_total"] = int(
+                state["payload_total"]
+            ) + payload_bytes
+            previous_min = state["payload_min"]
+            previous_max = state["payload_max"]
+            state["payload_min"] = (
+                payload_bytes
+                if previous_min is None
+                else min(int(previous_min), payload_bytes)
+            )
+            state["payload_max"] = (
+                payload_bytes
+                if previous_max is None
+                else max(int(previous_max), payload_bytes)
+            )
+
+            aggregate_hits = state["marker_hits"]
+            assert isinstance(aggregate_hits, Counter)
+            aggregate_hits.update(marker_hits)
+
+            aggregate_depths = state["depths"]
+            assert isinstance(aggregate_depths, dict)
+            for marker_name, depths in node_depths[node_id].items():
+                target_depths = aggregate_depths.setdefault(
+                    marker_name,
+                    Counter(),
+                )
+                target_depths.update(depths)
+
+        shared_ancestor_candidates: dict[str, object] = {}
+        for field, state in sorted(
+            shared_fields.items(),
+            key=lambda item: (
+                -int(item[1]["nodes"]),
+                item[0],
+            ),
+        )[:max_fields]:
+            nodes = int(state["nodes"])
+            marker_hits = state["marker_hits"]
+            depths = state["depths"]
+            assert isinstance(marker_hits, Counter)
+            assert isinstance(depths, dict)
+            shared_ancestor_candidates[str(field)] = {
+                "nodes": nodes,
+                "marker_hits": dict(sorted(marker_hits.items())),
+                "depths": {
+                    marker: {
+                        str(depth): count
+                        for depth, count in sorted(
+                            marker_depths.items()
+                        )
+                    }
+                    for marker, marker_depths in sorted(
+                        depths.items()
+                    )
+                },
+                "payload_bytes": {
+                    "min": int(state["payload_min"] or 0),
+                    "max": int(state["payload_max"] or 0),
+                    "avg": round(
+                        int(state["payload_total"]) / nodes,
+                        2,
+                    ),
+                },
+            }
+
         return {
             "body_bytes": self._bytes_seen,
             "markers": dict(sorted(self._marker_counts.items())),
@@ -420,6 +551,7 @@ class ProtobufStreamScanner:
                 marker_distance_result
             ),
             "ancestor_chains_by_marker": ancestor_chain_result,
+            "shared_ancestor_candidates": shared_ancestor_candidates,
         }
 
 
@@ -500,6 +632,7 @@ if __name__ == "__main__":
         == 1
     )
     assert result["ancestor_chains_by_marker"]["pagead"][str(target)] == 1
+    assert result["shared_ancestor_candidates"] == {}
     mutated, changes = denature_ad_fields(field, [target])
     assert changes == {target: 1}
     assert mutated != field and len(mutated) == len(field)

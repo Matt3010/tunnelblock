@@ -80,6 +80,50 @@ class ProtobufScanTest(unittest.TestCase):
             {"7>3>100": 1},
         )
 
+    def test_shared_ancestor_candidates_use_physical_nodes(self):
+        page_leaf = self._field(14, b"x/pagead/y")
+        google_leaf = self._field(
+            7,
+            b"xgoogleadservices.comy",
+        )
+        shared_payload = page_leaf + google_leaf
+        shared_parent = self._field(14, shared_payload)
+        body = self._field(214, shared_parent + b"tail")
+
+        scanner = MODULE.ProtobufStreamScanner(backtrack_bytes=1024)
+        split = body.index(b"/pagead/") + 4
+        scanner.feed(body[:split])
+        scanner.feed(body[split:])
+        result = scanner.result()
+
+        shared = result["shared_ancestor_candidates"]
+        self.assertEqual(shared["14"]["nodes"], 1)
+        self.assertEqual(
+            shared["14"]["marker_hits"],
+            {"googleadservices": 1, "pagead": 1},
+        )
+        self.assertEqual(
+            shared["14"]["depths"]["pagead"],
+            {"1": 1},
+        )
+        self.assertEqual(
+            shared["14"]["depths"]["googleadservices"],
+            {"1": 1},
+        )
+        self.assertEqual(
+            shared["14"]["payload_bytes"]["avg"],
+            len(shared_payload),
+        )
+        self.assertEqual(shared["214"]["nodes"], 1)
+        self.assertEqual(
+            shared["214"]["depths"]["pagead"],
+            {"2": 1},
+        )
+        self.assertEqual(
+            shared["214"]["depths"]["googleadservices"],
+            {"2": 1},
+        )
+
     def test_streaming_parent_can_finish_after_marker_chunk(self):
         leaf = self._field(14, b"xx/pagead/yy")
         padding = b"z" * 256

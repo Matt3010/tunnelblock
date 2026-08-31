@@ -146,6 +146,119 @@ def _finalize_nested_distance_stats(
     }
 
 
+def _merge_shared_ancestor_candidates(
+    aggregate: dict[str, dict[str, object]],
+    value: object,
+) -> None:
+    if not isinstance(value, dict):
+        return
+
+    for raw_field, raw_state in value.items():
+        if not isinstance(raw_state, dict):
+            continue
+        try:
+            nodes = int(raw_state.get("nodes", 0))
+        except (TypeError, ValueError):
+            continue
+        if nodes <= 0:
+            continue
+
+        field = str(raw_field)
+        state = aggregate.setdefault(
+            field,
+            {
+                "nodes": 0,
+                "marker_hits": Counter(),
+                "depths": {},
+                "payload_total": 0.0,
+                "payload_min": None,
+                "payload_max": None,
+            },
+        )
+        state["nodes"] = int(state["nodes"]) + nodes
+
+        marker_hits = state["marker_hits"]
+        assert isinstance(marker_hits, Counter)
+        _counter_from_mapping(
+            marker_hits,
+            raw_state.get("marker_hits"),
+        )
+
+        raw_depths = raw_state.get("depths")
+        depths = state["depths"]
+        assert isinstance(depths, dict)
+        if isinstance(raw_depths, dict):
+            for marker, raw_counts in raw_depths.items():
+                if not isinstance(raw_counts, dict):
+                    continue
+                target = depths.setdefault(str(marker), Counter())
+                _counter_from_mapping(target, raw_counts)
+
+        raw_payload = raw_state.get("payload_bytes")
+        if isinstance(raw_payload, dict):
+            try:
+                minimum = int(raw_payload.get("min"))
+                maximum = int(raw_payload.get("max"))
+                average = float(raw_payload.get("avg"))
+            except (TypeError, ValueError):
+                continue
+            state["payload_total"] = float(
+                state["payload_total"]
+            ) + (average * nodes)
+            current_min = state["payload_min"]
+            current_max = state["payload_max"]
+            state["payload_min"] = (
+                minimum
+                if current_min is None
+                else min(int(current_min), minimum)
+            )
+            state["payload_max"] = (
+                maximum
+                if current_max is None
+                else max(int(current_max), maximum)
+            )
+
+
+def _finalize_shared_ancestor_candidates(
+    aggregate: dict[str, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    rows = sorted(
+        aggregate.items(),
+        key=lambda item: (-int(item[1]["nodes"]), item[0]),
+    )
+    result: dict[str, dict[str, object]] = {}
+    for field, state in rows:
+        nodes = int(state["nodes"])
+        marker_hits = state["marker_hits"]
+        depths = state["depths"]
+        assert isinstance(marker_hits, Counter)
+        assert isinstance(depths, dict)
+
+        result[field] = {
+            "nodes": nodes,
+            "marker_hits": dict(sorted(marker_hits.items())),
+            "depths": {
+                marker: {
+                    depth: count
+                    for depth, count in sorted(
+                        marker_depths.items(),
+                        key=lambda item: int(item[0]),
+                    )
+                }
+                for marker, marker_depths in sorted(depths.items())
+            },
+            "payload_bytes": {
+                "min": int(state["payload_min"] or 0),
+                "max": int(state["payload_max"] or 0),
+                "avg": round(
+                    float(state["payload_total"]) / nodes,
+                    2,
+                ),
+            },
+        }
+    return result
+
+
 def summarize(lines: list[str]) -> dict[str, object]:
     events: Counter[str] = Counter()
     transports: Counter[str] = Counter()
@@ -163,6 +276,7 @@ def summarize(lines: list[str]) -> dict[str, object]:
         str, dict[str, dict[str, float | int | None]]
     ] = {}
     protobuf_ancestor_chains: dict[str, Counter[str]] = {}
+    protobuf_shared_ancestors: dict[str, dict[str, object]] = {}
     protobuf_mutated_fields: Counter[str] = Counter()
     protobuf_responses_scanned = 0
     protobuf_responses_skipped = 0
@@ -233,6 +347,10 @@ def summarize(lines: list[str]) -> dict[str, object]:
                 protobuf_ancestor_chains,
                 record.get("ancestor_chains_by_marker"),
             )
+            _merge_shared_ancestor_candidates(
+                protobuf_shared_ancestors,
+                record.get("shared_ancestor_candidates"),
+            )
         elif event == "protobuf_response_scan_skipped":
             protobuf_responses_skipped += 1
         elif event == "protobuf_response_mutation":
@@ -298,6 +416,11 @@ def summarize(lines: list[str]) -> dict[str, object]:
             "ancestor_chains_by_marker": (
                 _finalize_nested_counters(
                     protobuf_ancestor_chains
+                )
+            ),
+            "shared_ancestor_candidates": (
+                _finalize_shared_ancestor_candidates(
+                    protobuf_shared_ancestors
                 )
             ),
             "mutations": protobuf_mutations,

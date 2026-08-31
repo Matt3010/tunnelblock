@@ -190,6 +190,7 @@ def _emit_protobuf_scan(
             "nearest_candidate_distance_bytes_by_marker"
         ],
         ancestor_chains_by_marker=result["ancestor_chains_by_marker"],
+        shared_ancestor_candidates=result["shared_ancestor_candidates"],
         blocking_enabled=PROTOBUF_BLOCKING_ENABLED,
     )
 
