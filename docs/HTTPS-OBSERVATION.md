@@ -65,7 +65,7 @@ Recorded fields can include:
 - URL path **without query string**, with long/token-like path segments redacted;
 - response status;
 - HTTP version;
-- for eligible InnerTube protobuf responses only: total scanned bytes, aggregate ad-marker counts, marker-specific nearest field numbers/distances, and bounded protobuf ancestor chains expressed only as field numbers.
+- for eligible InnerTube protobuf responses only: total scanned bytes, aggregate ad-marker counts, marker-specific nearest field numbers/distances, bounded protobuf ancestor chains, and shared physical ancestor summaries (field number, marker depths, node count and payload-size statistics).
 
 The addon does **not** persist:
 
@@ -91,7 +91,7 @@ Generate an aggregate report that does not reproduce individual hosts, paths or 
 python3 scripts/analyze-youtube-observations.py
 ```
 
-The report focuses on protobuf marker counts, marker-specific nearest fields/distances and ancestor-chain frequencies. Field numbers and chains are schema-free observations, not blocking decisions; repeated ad/no-ad validation is required before any field can be configured for mutation.
+The report focuses on protobuf marker counts, marker-specific nearest fields/distances, ancestor-chain frequencies and shared physical ancestor candidates. Shared candidates are computed from tag/payload coordinates in memory and emitted only as aggregate field/depth/size metadata; absolute positions and payload bytes are not persisted. These values are dry-run evidence, not blocking decisions; repeated ad/no-ad validation is required before any structural target can be configured for mutation.
 
 `mitmdump` runs with `flow_detail=0`, so its normal request/response flow summaries are not written to Docker stdout. The JSONL file above is the canonical observation log; container logs are reserved for proxy/runtime failures.
 
