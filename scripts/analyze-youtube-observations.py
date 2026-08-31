@@ -20,13 +20,50 @@ def _counter_from_mapping(counter: Counter[str], value: object) -> None:
             continue
 
 
+def _merge_nearest_fields(
+    hits: Counter[str],
+    distance_sum: Counter[str],
+    min_distance: dict[str, int],
+    max_distance: dict[str, int],
+    value: object,
+) -> None:
+    if not isinstance(value, dict):
+        return
+
+    for raw_field, raw_stats in value.items():
+        if not isinstance(raw_stats, dict):
+            continue
+        field = str(raw_field)
+        try:
+            field_hits = int(raw_stats.get("hits", 0))
+            field_min = int(raw_stats.get("min_distance", 0))
+            field_max = int(raw_stats.get("max_distance", 0))
+            field_avg = float(raw_stats.get("avg_distance", 0))
+        except (TypeError, ValueError):
+            continue
+        if field_hits <= 0:
+            continue
+
+        hits[field] += field_hits
+        distance_sum[field] += field_avg * field_hits
+        min_distance[field] = min(
+            field_min, min_distance.get(field, field_min)
+        )
+        max_distance[field] = max(
+            field_max, max_distance.get(field, field_max)
+        )
+
+
 def summarize(lines: list[str]) -> dict[str, object]:
     events: Counter[str] = Counter()
     transports: Counter[str] = Counter()
     http_versions: Counter[str] = Counter()
     tls_failures: Counter[str] = Counter()
     protobuf_markers: Counter[str] = Counter()
-    protobuf_fields: Counter[str] = Counter()
+    protobuf_nearest_hits: Counter[str] = Counter()
+    protobuf_nearest_distance_sum: Counter[str] = Counter()
+    protobuf_nearest_min_distance: dict[str, int] = {}
+    protobuf_nearest_max_distance: dict[str, int] = {}
     protobuf_mutated_fields: Counter[str] = Counter()
     protobuf_responses_scanned = 0
     protobuf_responses_skipped = 0
@@ -60,8 +97,12 @@ def summarize(lines: list[str]) -> dict[str, object]:
             except (TypeError, ValueError):
                 pass
             _counter_from_mapping(protobuf_markers, record.get("markers"))
-            _counter_from_mapping(
-                protobuf_fields, record.get("candidate_fields")
+            _merge_nearest_fields(
+                protobuf_nearest_hits,
+                protobuf_nearest_distance_sum,
+                protobuf_nearest_min_distance,
+                protobuf_nearest_max_distance,
+                record.get("nearest_fields"),
             )
         elif event == "protobuf_response_scan_skipped":
             protobuf_responses_skipped += 1
@@ -74,8 +115,26 @@ def summarize(lines: list[str]) -> dict[str, object]:
                 protobuf_mutated_fields, record.get("mutated_fields")
             )
 
+    nearest_stats = {}
+    for field, field_hits in sorted(
+        protobuf_nearest_hits.items(),
+        key=lambda item: (
+            -item[1],
+            protobuf_nearest_min_distance[item[0]],
+            item[0],
+        ),
+    ):
+        nearest_stats[field] = {
+            "hits": field_hits,
+            "min_distance": protobuf_nearest_min_distance[field],
+            "max_distance": protobuf_nearest_max_distance[field],
+            "avg_distance": round(
+                protobuf_nearest_distance_sum[field] / field_hits, 2
+            ),
+        }
+
     return {
-        "classification": "protobuf_discovery_only",
+        "classification": "protobuf_nearest_field_discovery",
         "blocking_observed": protobuf_mutations > 0,
         "records": sum(events.values()),
         "invalid_lines": invalid_lines,
@@ -88,12 +147,7 @@ def summarize(lines: list[str]) -> dict[str, object]:
             "responses_skipped": protobuf_responses_skipped,
             "bytes_scanned": protobuf_bytes_scanned,
             "marker_occurrences": dict(sorted(protobuf_markers.items())),
-            "candidate_field_hits": dict(
-                sorted(
-                    protobuf_fields.items(),
-                    key=lambda item: (-item[1], item[0]),
-                )
-            ),
+            "nearest_field_stats": nearest_stats,
             "mutations": protobuf_mutations,
             "mutated_field_hits": dict(
                 sorted(
