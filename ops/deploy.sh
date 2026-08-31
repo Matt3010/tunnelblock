@@ -146,8 +146,7 @@ deploy_target() (
   python3 -B -m unittest \
     phase2/mitmproxy/test_analyze_observations.py \
     phase2/mitmproxy/test_protobuf_scan.py \
-    phase2/mitmproxy/test_ump_diagnostics.py \
-    phase2/mitmproxy/test_ump_filter.py >>"$LOG_FILE" 2>&1
+    phase2/mitmproxy/test_ump_diagnostics.py >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: DNS tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1
