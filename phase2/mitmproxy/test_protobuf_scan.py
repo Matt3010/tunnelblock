@@ -178,6 +178,60 @@ class ProtobufScanTest(unittest.TestCase):
             [field for field, _distance in fields],
         )
 
+    def test_shared_structural_denature_mutates_parent_not_same_number_leaf(self):
+        page_leaf = self._field(14, b"x/pagead/y")
+        google_leaf = self._field(
+            7,
+            b"xgoogleadservices.comy",
+        )
+        shared_payload = page_leaf + google_leaf
+        shared_parent = self._field(14, shared_payload)
+        unrelated_page_leaf = self._field(14, b"z/pagead/z")
+        body = (
+            unrelated_page_leaf
+            + self._field(214, shared_parent)
+        )
+
+        nodes = MODULE.shared_marker_field_nodes(
+            body,
+            [14],
+            backtrack_bytes=1024,
+        )
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0][0], 14)
+        self.assertEqual(
+            nodes[0][4] - nodes[0][3],
+            len(shared_payload),
+        )
+
+        mutated, changes = MODULE.denature_shared_ad_fields(
+            body,
+            [14],
+            backtrack_bytes=1024,
+        )
+
+        self.assertEqual(changes, {14: 1})
+        self.assertEqual(len(mutated), len(body))
+        self.assertEqual(
+            mutated[: len(unrelated_page_leaf)],
+            unrelated_page_leaf,
+        )
+        self.assertNotEqual(mutated, body)
+        self.assertIn(b"/pagead/", mutated)
+        self.assertIn(b"googleadservices.com", mutated)
+
+    def test_shared_structural_denature_requires_both_marker_types(self):
+        body = self._field(14, b"only/pagead/here")
+
+        mutated, changes = MODULE.denature_shared_ad_fields(
+            body,
+            [14],
+            backtrack_bytes=1024,
+        )
+
+        self.assertEqual(mutated, body)
+        self.assertEqual(changes, {})
+
     def test_denature_is_inert_without_validated_targets(self):
         body = self._field(
             50195462,
