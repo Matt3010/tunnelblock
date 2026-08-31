@@ -20,6 +20,34 @@ def _counter_from_mapping(counter: Counter[str], value: object) -> None:
             continue
 
 
+def _merge_nested_counters(
+    aggregate: dict[str, Counter[str]],
+    value: object,
+) -> None:
+    if not isinstance(value, dict):
+        return
+    for group, mapping in value.items():
+        if not isinstance(mapping, dict):
+            continue
+        counter = aggregate.setdefault(str(group), Counter())
+        _counter_from_mapping(counter, mapping)
+
+
+def _finalize_nested_counters(
+    aggregate: dict[str, Counter[str]],
+) -> dict[str, dict[str, int]]:
+    return {
+        group: {
+            key: count
+            for key, count in sorted(
+                counter.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        }
+        for group, counter in sorted(aggregate.items())
+    }
+
+
 def _merge_distance_stats(
     aggregate: dict[str, dict[str, float | int | None]],
     value: object,
@@ -51,13 +79,21 @@ def _merge_distance_stats(
             },
         )
         state["hits"] = int(state["hits"] or 0) + hits
-        state["weighted_total"] = float(state["weighted_total"] or 0.0) + (
-            average * hits
-        )
+        state["weighted_total"] = float(
+            state["weighted_total"] or 0.0
+        ) + (average * hits)
         current_min = state["min"]
         current_max = state["max"]
-        state["min"] = minimum if current_min is None else min(int(current_min), minimum)
-        state["max"] = maximum if current_max is None else max(int(current_max), maximum)
+        state["min"] = (
+            minimum
+            if current_min is None
+            else min(int(current_min), minimum)
+        )
+        state["max"] = (
+            maximum
+            if current_max is None
+            else max(int(current_max), maximum)
+        )
 
 
 def _finalize_distance_stats(
@@ -76,9 +112,38 @@ def _finalize_distance_stats(
             "hits": hits,
             "min": int(state["min"] or 0),
             "max": int(state["max"] or 0),
-            "avg": round(float(state["weighted_total"] or 0.0) / hits, 2),
+            "avg": round(
+                float(state["weighted_total"] or 0.0) / hits,
+                2,
+            ),
         }
     return result
+
+
+def _merge_nested_distance_stats(
+    aggregate: dict[
+        str, dict[str, dict[str, float | int | None]]
+    ],
+    value: object,
+) -> None:
+    if not isinstance(value, dict):
+        return
+    for marker, fields in value.items():
+        if not isinstance(fields, dict):
+            continue
+        target = aggregate.setdefault(str(marker), {})
+        _merge_distance_stats(target, fields)
+
+
+def _finalize_nested_distance_stats(
+    aggregate: dict[
+        str, dict[str, dict[str, float | int | None]]
+    ],
+) -> dict[str, dict[str, dict[str, int | float]]]:
+    return {
+        marker: _finalize_distance_stats(fields)
+        for marker, fields in sorted(aggregate.items())
+    }
 
 
 def summarize(lines: list[str]) -> dict[str, object]:
@@ -93,6 +158,11 @@ def summarize(lines: list[str]) -> dict[str, object]:
     protobuf_nearest_distances: dict[
         str, dict[str, float | int | None]
     ] = {}
+    protobuf_nearest_by_marker: dict[str, Counter[str]] = {}
+    protobuf_marker_distances: dict[
+        str, dict[str, dict[str, float | int | None]]
+    ] = {}
+    protobuf_ancestor_chains: dict[str, Counter[str]] = {}
     protobuf_mutated_fields: Counter[str] = Counter()
     protobuf_responses_scanned = 0
     protobuf_responses_skipped = 0
@@ -117,21 +187,29 @@ def summarize(lines: list[str]) -> dict[str, object]:
         if record.get("http_version"):
             http_versions[str(record["http_version"])] += 1
         if event.startswith("tls_failed"):
-            tls_failures[str(record.get("error_category", "unknown"))] += 1
+            tls_failures[
+                str(record.get("error_category", "unknown"))
+            ] += 1
 
         if event == "protobuf_response_scan":
             protobuf_responses_scanned += 1
             try:
-                protobuf_bytes_scanned += int(record.get("body_bytes", 0))
+                protobuf_bytes_scanned += int(
+                    record.get("body_bytes", 0)
+                )
             except (TypeError, ValueError):
                 pass
-            _counter_from_mapping(protobuf_markers, record.get("markers"))
+            _counter_from_mapping(
+                protobuf_markers,
+                record.get("markers"),
+            )
             _counter_from_mapping(
                 protobuf_markers_without_candidate,
                 record.get("markers_without_candidate"),
             )
             _counter_from_mapping(
-                protobuf_fields, record.get("candidate_fields")
+                protobuf_fields,
+                record.get("candidate_fields"),
             )
             _counter_from_mapping(
                 protobuf_nearest_fields,
@@ -141,15 +219,32 @@ def summarize(lines: list[str]) -> dict[str, object]:
                 protobuf_nearest_distances,
                 record.get("nearest_candidate_distance_bytes"),
             )
+            _merge_nested_counters(
+                protobuf_nearest_by_marker,
+                record.get("nearest_candidate_fields_by_marker"),
+            )
+            _merge_nested_distance_stats(
+                protobuf_marker_distances,
+                record.get(
+                    "nearest_candidate_distance_bytes_by_marker"
+                ),
+            )
+            _merge_nested_counters(
+                protobuf_ancestor_chains,
+                record.get("ancestor_chains_by_marker"),
+            )
         elif event == "protobuf_response_scan_skipped":
             protobuf_responses_skipped += 1
         elif event == "protobuf_response_mutation":
             try:
-                protobuf_mutations += int(record.get("mutation_count", 0))
+                protobuf_mutations += int(
+                    record.get("mutation_count", 0)
+                )
             except (TypeError, ValueError):
                 pass
             _counter_from_mapping(
-                protobuf_mutated_fields, record.get("mutated_fields")
+                protobuf_mutated_fields,
+                record.get("mutated_fields"),
             )
 
     return {
@@ -165,9 +260,13 @@ def summarize(lines: list[str]) -> dict[str, object]:
             "responses_scanned": protobuf_responses_scanned,
             "responses_skipped": protobuf_responses_skipped,
             "bytes_scanned": protobuf_bytes_scanned,
-            "marker_occurrences": dict(sorted(protobuf_markers.items())),
+            "marker_occurrences": dict(
+                sorted(protobuf_markers.items())
+            ),
             "markers_without_candidate": dict(
-                sorted(protobuf_markers_without_candidate.items())
+                sorted(
+                    protobuf_markers_without_candidate.items()
+                )
             ),
             "candidate_field_hits": dict(
                 sorted(
@@ -181,8 +280,25 @@ def summarize(lines: list[str]) -> dict[str, object]:
                     key=lambda item: (-item[1], item[0]),
                 )
             ),
-            "nearest_candidate_distance_bytes": _finalize_distance_stats(
-                protobuf_nearest_distances
+            "nearest_candidate_distance_bytes": (
+                _finalize_distance_stats(
+                    protobuf_nearest_distances
+                )
+            ),
+            "nearest_candidate_fields_by_marker": (
+                _finalize_nested_counters(
+                    protobuf_nearest_by_marker
+                )
+            ),
+            "nearest_candidate_distance_bytes_by_marker": (
+                _finalize_nested_distance_stats(
+                    protobuf_marker_distances
+                )
+            ),
+            "ancestor_chains_by_marker": (
+                _finalize_nested_counters(
+                    protobuf_ancestor_chains
+                )
             ),
             "mutations": protobuf_mutations,
             "mutated_field_hits": dict(
@@ -206,9 +322,14 @@ def main() -> int:
     args = parser.parse_args()
     path = Path(args.log)
     if not path.is_file():
-        print(f"Observation log not found: {path}", file=sys.stderr)
+        print(
+            f"Observation log not found: {path}",
+            file=sys.stderr,
+        )
         return 1
-    result = summarize(path.read_text(encoding="utf-8").splitlines())
+    result = summarize(
+        path.read_text(encoding="utf-8").splitlines()
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

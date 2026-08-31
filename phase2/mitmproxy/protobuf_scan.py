@@ -6,10 +6,13 @@ from collections import Counter
 MAX_FIELD_NUMBER = (1 << 29) - 1
 DEFAULT_BACKTRACK_BYTES = 8192
 DEFAULT_TAIL_BYTES = DEFAULT_BACKTRACK_BYTES + 256
+MAX_ANCESTOR_DEPTH = 8
 MARKERS: dict[str, bytes] = {
     "pagead": b"/pagead/",
     "googleadservices": b"googleadservices.com",
 }
+
+CandidateDetail = tuple[int, int, int, int, int]
 
 
 def decode_varint(
@@ -53,25 +56,19 @@ def tag_bytes(field_number: int, wire_type: int = 2) -> bytes:
     return encode_varint((field_number << 3) | wire_type)
 
 
-def enclosing_length_delimited_candidates(
+def _length_delimited_candidate_details(
     data: bytes | bytearray | memoryview,
     marker_start: int,
     marker_length: int,
-    backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
-) -> list[tuple[int, int, int]]:
-    """Return plausible enclosing protobuf fields as (field, distance, tag_pos).
-
-    A candidate is accepted only when its decoded length-delimited payload is
-    fully present in the observed buffer and actually contains the complete
-    marker. Results are nearest-first.
-    """
-
+    backtrack_bytes: int,
+    require_complete_payload: bool,
+) -> list[CandidateDetail]:
     if marker_start < 0 or marker_length <= 0:
         return []
 
     marker_end = marker_start + marker_length
     start = max(0, marker_start - max(0, backtrack_bytes))
-    candidates: list[tuple[int, int, int]] = []
+    candidates: list[CandidateDetail] = []
 
     for pos in range(start, marker_start):
         key_decoded = decode_varint(data, pos, max_bytes=5)
@@ -89,15 +86,47 @@ def enclosing_length_delimited_candidates(
         payload_length, payload_start = length_decoded
         payload_end = payload_start + payload_length
         if (
-            payload_end <= len(data)
-            and payload_start <= marker_start
+            payload_start <= marker_start
             and marker_end <= payload_end
+            and (
+                not require_complete_payload
+                or payload_end <= len(data)
+            )
         ):
             distance = marker_start - pos
             if distance <= backtrack_bytes:
-                candidates.append((field_number, distance, pos))
+                candidates.append(
+                    (
+                        field_number,
+                        distance,
+                        pos,
+                        payload_start,
+                        payload_end,
+                    )
+                )
 
     return sorted(candidates, key=lambda item: (item[1], item[0], item[2]))
+
+
+def enclosing_length_delimited_candidates(
+    data: bytes | bytearray | memoryview,
+    marker_start: int,
+    marker_length: int,
+    backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
+) -> list[tuple[int, int, int]]:
+    """Return complete enclosing protobuf fields as (field, distance, tag_pos)."""
+
+    return [
+        (field, distance, tag_pos)
+        for field, distance, tag_pos, _payload_start, _payload_end
+        in _length_delimited_candidate_details(
+            data,
+            marker_start,
+            marker_length,
+            backtrack_bytes,
+            require_complete_payload=True,
+        )
+    ]
 
 
 def enclosing_length_delimited_fields(
@@ -106,7 +135,7 @@ def enclosing_length_delimited_fields(
     marker_length: int,
     backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
 ) -> list[tuple[int, int]]:
-    """Return nearest occurrence of each plausible enclosing field."""
+    """Return nearest complete occurrence of each plausible enclosing field."""
 
     nearest: dict[int, int] = {}
     for field_number, distance, _pos in enclosing_length_delimited_candidates(
@@ -118,6 +147,60 @@ def enclosing_length_delimited_fields(
         if field_number not in nearest:
             nearest[field_number] = distance
     return sorted(nearest.items(), key=lambda item: (item[1], item[0]))
+
+
+def _ancestor_chain(
+    candidates: list[CandidateDetail],
+    max_depth: int = MAX_ANCESTOR_DEPTH,
+) -> tuple[int, ...]:
+    """Return the nearest properly nested field chain, leaf first."""
+
+    if not candidates or max_depth <= 0:
+        return ()
+
+    ordered = sorted(candidates, key=lambda item: (item[1], item[0], item[2]))
+    current = ordered[0]
+    chain = [current[0]]
+
+    while len(chain) < max_depth:
+        outer = [
+            candidate
+            for candidate in ordered
+            if (
+                candidate[2] < current[2]
+                and candidate[3] <= current[2]
+                and candidate[4] >= current[4]
+            )
+        ]
+        if not outer:
+            break
+        parent = min(outer, key=lambda item: (item[1], item[0], item[2]))
+        chain.append(parent[0])
+        current = parent
+
+    return tuple(chain)
+
+
+def _distance_stats(
+    hits: Counter[int],
+    totals: Counter[int],
+    minimums: dict[int, int],
+    maximums: dict[int, int],
+    max_fields: int,
+) -> dict[str, dict[str, int | float]]:
+    rows = sorted(
+        hits.items(),
+        key=lambda item: (-item[1], minimums[item[0]], item[0]),
+    )[:max_fields]
+    return {
+        str(field): {
+            "hits": count,
+            "min": minimums[field],
+            "max": maximums[field],
+            "avg": round(totals[field] / count, 2),
+        }
+        for field, count in rows
+    }
 
 
 class ProtobufStreamScanner:
@@ -133,22 +216,7 @@ class ProtobufStreamScanner:
         self._tail = b""
         self._bytes_seen = 0
         self._marker_counts: Counter[str] = Counter()
-        self._marker_without_candidate: Counter[str] = Counter()
-        self._candidate_fields: Counter[int] = Counter()
-        self._nearest_fields: Counter[int] = Counter()
-        self._nearest_distance_total: Counter[int] = Counter()
-        self._nearest_distance_min: dict[int, int] = {}
-        self._nearest_distance_max: dict[int, int] = {}
-
-    def _record_nearest(self, field_number: int, distance: int) -> None:
-        self._nearest_fields[field_number] += 1
-        self._nearest_distance_total[field_number] += distance
-        previous_min = self._nearest_distance_min.get(field_number)
-        previous_max = self._nearest_distance_max.get(field_number)
-        if previous_min is None or distance < previous_min:
-            self._nearest_distance_min[field_number] = distance
-        if previous_max is None or distance > previous_max:
-            self._nearest_distance_max[field_number] = distance
+        self._observations: list[tuple[str, list[CandidateDetail]]] = []
 
     def feed(self, chunk: bytes) -> None:
         if not chunk:
@@ -164,56 +232,194 @@ class ProtobufStreamScanner:
                 marker_pos = combined.find(marker, search_from)
                 if marker_pos < 0:
                     break
+
                 absolute_end = absolute_base + marker_pos + len(marker)
                 if absolute_end > previous_total:
                     self._marker_counts[marker_name] += 1
-                    fields = enclosing_length_delimited_fields(
+                    local_candidates = _length_delimited_candidate_details(
                         combined,
                         marker_pos,
                         len(marker),
                         self.backtrack_bytes,
+                        require_complete_payload=False,
                     )
-                    for field_number, _distance in fields[:12]:
-                        self._candidate_fields[field_number] += 1
-                    if fields:
-                        self._record_nearest(*fields[0])
-                    else:
-                        self._marker_without_candidate[marker_name] += 1
+                    absolute_candidates = [
+                        (
+                            field,
+                            distance,
+                            absolute_base + tag_pos,
+                            absolute_base + payload_start,
+                            absolute_base + payload_end,
+                        )
+                        for (
+                            field,
+                            distance,
+                            tag_pos,
+                            payload_start,
+                            payload_end,
+                        ) in local_candidates
+                    ]
+                    self._observations.append(
+                        (marker_name, absolute_candidates)
+                    )
+
                 search_from = marker_pos + 1
 
         self._bytes_seen += len(chunk)
         self._tail = combined[-self.tail_bytes :]
 
     def result(self, max_fields: int = 16) -> dict[str, object]:
+        candidate_fields: Counter[int] = Counter()
+        nearest_fields: Counter[int] = Counter()
+        nearest_distance_total: Counter[int] = Counter()
+        nearest_distance_min: dict[int, int] = {}
+        nearest_distance_max: dict[int, int] = {}
+        markers_without_candidate: Counter[str] = Counter()
+
+        nearest_by_marker: dict[str, Counter[int]] = {}
+        marker_distance_hits: dict[str, Counter[int]] = {}
+        marker_distance_total: dict[str, Counter[int]] = {}
+        marker_distance_min: dict[str, dict[int, int]] = {}
+        marker_distance_max: dict[str, dict[int, int]] = {}
+        ancestor_chains: dict[str, Counter[str]] = {}
+
+        def record_distance(
+            marker_name: str,
+            field_number: int,
+            distance: int,
+        ) -> None:
+            nearest_fields[field_number] += 1
+            nearest_distance_total[field_number] += distance
+            nearest_distance_min[field_number] = min(
+                distance,
+                nearest_distance_min.get(field_number, distance),
+            )
+            nearest_distance_max[field_number] = max(
+                distance,
+                nearest_distance_max.get(field_number, distance),
+            )
+
+            nearest_by_marker.setdefault(marker_name, Counter())[
+                field_number
+            ] += 1
+            marker_distance_hits.setdefault(marker_name, Counter())[
+                field_number
+            ] += 1
+            marker_distance_total.setdefault(marker_name, Counter())[
+                field_number
+            ] += distance
+
+            marker_min = marker_distance_min.setdefault(marker_name, {})
+            marker_max = marker_distance_max.setdefault(marker_name, {})
+            marker_min[field_number] = min(
+                distance,
+                marker_min.get(field_number, distance),
+            )
+            marker_max[field_number] = max(
+                distance,
+                marker_max.get(field_number, distance),
+            )
+
+        for marker_name, observed_candidates in self._observations:
+            valid = [
+                candidate
+                for candidate in observed_candidates
+                if candidate[4] <= self._bytes_seen
+            ]
+            valid.sort(key=lambda item: (item[1], item[0], item[2]))
+
+            nearest_per_field: dict[int, int] = {}
+            for field_number, distance, *_rest in valid:
+                if field_number not in nearest_per_field:
+                    nearest_per_field[field_number] = distance
+            fields = sorted(
+                nearest_per_field.items(),
+                key=lambda item: (item[1], item[0]),
+            )
+            for field_number, _distance in fields[:12]:
+                candidate_fields[field_number] += 1
+
+            if not fields:
+                markers_without_candidate[marker_name] += 1
+                continue
+
+            field_number, distance = fields[0]
+            record_distance(marker_name, field_number, distance)
+
+            chain = _ancestor_chain(valid)
+            if chain:
+                chain_key = ">".join(str(field) for field in chain)
+                ancestor_chains.setdefault(marker_name, Counter())[
+                    chain_key
+                ] += 1
+
         fields = sorted(
-            self._candidate_fields.items(),
+            candidate_fields.items(),
             key=lambda item: (-item[1], item[0]),
         )[:max_fields]
         nearest = sorted(
-            self._nearest_fields.items(),
+            nearest_fields.items(),
             key=lambda item: (-item[1], item[0]),
         )[:max_fields]
-        distance_stats: dict[str, dict[str, int | float]] = {}
-        for field, hits in nearest:
-            total = self._nearest_distance_total[field]
-            distance_stats[str(field)] = {
-                "hits": hits,
-                "min": self._nearest_distance_min[field],
-                "max": self._nearest_distance_max[field],
-                "avg": round(total / hits, 2),
+
+        nearest_by_marker_result = {
+            marker: {
+                str(field): count
+                for field, count in sorted(
+                    counts.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )[:max_fields]
             }
+            for marker, counts in sorted(nearest_by_marker.items())
+        }
+
+        marker_distance_result: dict[
+            str, dict[str, dict[str, int | float]]
+        ] = {}
+        for marker, hits in sorted(marker_distance_hits.items()):
+            marker_distance_result[marker] = _distance_stats(
+                hits,
+                marker_distance_total[marker],
+                marker_distance_min[marker],
+                marker_distance_max[marker],
+                max_fields,
+            )
+
+        ancestor_chain_result = {
+            marker: {
+                chain: count
+                for chain, count in sorted(
+                    chains.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )[:max_fields]
+            }
+            for marker, chains in sorted(ancestor_chains.items())
+        }
 
         return {
             "body_bytes": self._bytes_seen,
             "markers": dict(sorted(self._marker_counts.items())),
             "markers_without_candidate": dict(
-                sorted(self._marker_without_candidate.items())
+                sorted(markers_without_candidate.items())
             ),
-            "candidate_fields": {str(field): count for field, count in fields},
+            "candidate_fields": {
+                str(field): count for field, count in fields
+            },
             "nearest_candidate_fields": {
                 str(field): count for field, count in nearest
             },
-            "nearest_candidate_distance_bytes": distance_stats,
+            "nearest_candidate_distance_bytes": _distance_stats(
+                nearest_fields,
+                nearest_distance_total,
+                nearest_distance_min,
+                nearest_distance_max,
+                max_fields,
+            ),
+            "nearest_candidate_fields_by_marker": nearest_by_marker_result,
+            "nearest_candidate_distance_bytes_by_marker": (
+                marker_distance_result
+            ),
+            "ancestor_chains_by_marker": ancestor_chain_result,
         }
 
 
@@ -289,6 +495,11 @@ if __name__ == "__main__":
     result = scanner.result()
     assert result["markers"]["pagead"] == 1
     assert result["nearest_candidate_fields"][str(target)] == 1
+    assert (
+        result["nearest_candidate_fields_by_marker"]["pagead"][str(target)]
+        == 1
+    )
+    assert result["ancestor_chains_by_marker"]["pagead"][str(target)] == 1
     mutated, changes = denature_ad_fields(field, [target])
     assert changes == {target: 1}
     assert mutated != field and len(mutated) == len(field)

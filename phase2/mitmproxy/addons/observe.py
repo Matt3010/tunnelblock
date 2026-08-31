@@ -183,6 +183,13 @@ def _emit_protobuf_scan(
         nearest_candidate_distance_bytes=result[
             "nearest_candidate_distance_bytes"
         ],
+        nearest_candidate_fields_by_marker=result[
+            "nearest_candidate_fields_by_marker"
+        ],
+        nearest_candidate_distance_bytes_by_marker=result[
+            "nearest_candidate_distance_bytes_by_marker"
+        ],
+        ancestor_chains_by_marker=result["ancestor_chains_by_marker"],
         blocking_enabled=PROTOBUF_BLOCKING_ENABLED,
     )
 
