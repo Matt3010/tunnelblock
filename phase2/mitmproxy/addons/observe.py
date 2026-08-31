@@ -9,6 +9,12 @@ from urllib.parse import urlsplit
 from mitmproxy import http
 from mitmproxy import tls
 
+from protobuf_scan import (
+    DEFAULT_BACKTRACK_BYTES,
+    ProtobufStreamScanner,
+    denature_ad_fields,
+)
+
 LOG_PATH = Path(
     os.environ.get(
         "OBSERVATION_LOG",
@@ -25,7 +31,37 @@ HOST_SUFFIXES = tuple(
     ).split(",")
     if item.strip()
 )
+PROTOBUF_BACKTRACK_BYTES = int(
+    os.environ.get("PROTOBUF_BACKTRACK_BYTES", str(DEFAULT_BACKTRACK_BYTES))
+)
+PROTOBUF_BLOCKING_ENABLED = (
+    os.environ.get("PROTOBUF_BLOCKING_ENABLED", "false").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 _lock = threading.Lock()
+
+
+def _parse_target_fields(raw: str) -> tuple[int, ...]:
+    if not raw.strip():
+        return ()
+    fields = []
+    for item in raw.split(","):
+        value = int(item.strip())
+        if value <= 1:
+            raise ValueError(
+                "PROTOBUF_BLOCK_FIELD_TAGS must contain field numbers greater than 1"
+            )
+        fields.append(value)
+    return tuple(dict.fromkeys(fields))
+
+
+PROTOBUF_BLOCK_FIELD_TAGS = _parse_target_fields(
+    os.environ.get("PROTOBUF_BLOCK_FIELD_TAGS", "")
+)
+if PROTOBUF_BLOCKING_ENABLED and not PROTOBUF_BLOCK_FIELD_TAGS:
+    raise ValueError(
+        "PROTOBUF_BLOCKING_ENABLED requires validated PROTOBUF_BLOCK_FIELD_TAGS"
+    )
 
 
 def _now() -> str:
@@ -65,12 +101,26 @@ def _safe_path(raw: str) -> str:
             or "=" in segment
             or (segment.count(".") >= 2 and len(segment) > 20)
             or bool(re.fullmatch(r"[A-Za-z0-9_-]{16,}", segment))
-            or (previous in {"vi", "vi_webp"} and bool(re.fullmatch(r"[A-Za-z0-9_-]{8,}", segment)))
+            or (
+                previous in {"vi", "vi_webp"}
+                and bool(re.fullmatch(r"[A-Za-z0-9_-]{8,}", segment))
+            )
         )
         safe_segments.append("<redacted>" if token_like else segment)
 
     sanitized = "/".join(safe_segments)
     return sanitized[:512] or "/"
+
+
+def _is_inner_tube_request(host: str | None, path: str) -> bool:
+    return (
+        (host or "").rstrip(".").lower() == "youtubei.googleapis.com"
+        and path.startswith("/youtubei/v1/")
+    )
+
+
+def _is_protobuf_content_type(content_type: str | None) -> bool:
+    return "protobuf" in (content_type or "").lower()
 
 
 def _decode_alpn(value: object) -> str | None:
@@ -115,18 +165,40 @@ def _emit(event: str, **fields: object) -> None:
             handle.write(line + "\n")
 
 
+def _emit_protobuf_scan(
+    host: str,
+    path: str,
+    scanner: ProtobufStreamScanner,
+) -> None:
+    result = scanner.result()
+    _emit(
+        "protobuf_response_scan",
+        host=host,
+        path=path,
+        body_bytes=result["body_bytes"],
+        markers=result["markers"],
+        candidate_fields=result["candidate_fields"],
+        blocking_enabled=PROTOBUF_BLOCKING_ENABLED,
+    )
+
+
 def requestheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
-    # Stream payloads through unchanged so the observation addon never buffers
-    # complete request bodies in memory or writes them to persistent storage.
     request.stream = True
     if not _matches_host(request.pretty_host):
         return
+
+    path = _safe_path(request.path)
+    if _is_inner_tube_request(request.pretty_host, path):
+        # Ask YouTube for an uncompressed InnerTube response so the streaming
+        # scanner can inspect protobuf bytes without persisting the payload.
+        request.anticomp()
+
     _emit(
         "http_request",
         host=request.pretty_host,
         method=request.method,
-        path=_safe_path(request.path),
+        path=path,
         scheme=request.scheme,
         port=request.port,
         http_version=request.http_version,
@@ -136,19 +208,94 @@ def requestheaders(flow: http.HTTPFlow) -> None:
 def responseheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
     response = flow.response
-    if response is not None:
-        # The same guarantee applies to response bodies.
-        response.stream = True
-    if not _matches_host(request.pretty_host):
+    if response is None:
         return
+
+    if not _matches_host(request.pretty_host):
+        response.stream = True
+        return
+
+    path = _safe_path(request.path)
     _emit(
         "http_response",
         host=request.pretty_host,
         method=request.method,
-        path=_safe_path(request.path),
-        status_code=response.status_code if response else None,
-        http_version=response.http_version if response else None,
+        path=path,
+        status_code=response.status_code,
+        http_version=response.http_version,
     )
+
+    if (
+        not _is_inner_tube_request(request.pretty_host, path)
+        or not _is_protobuf_content_type(response.headers.get("content-type"))
+    ):
+        response.stream = True
+        return
+
+    if response.headers.get("content-encoding", "identity").lower() not in {
+        "",
+        "identity",
+    }:
+        _emit(
+            "protobuf_response_scan_skipped",
+            host=request.pretty_host,
+            path=path,
+            reason="content_encoded",
+        )
+        response.stream = True
+        return
+
+    if PROTOBUF_BLOCKING_ENABLED and PROTOBUF_BLOCK_FIELD_TAGS:
+        # Mutation is deliberately opt-in. Only this mode buffers matching
+        # InnerTube protobuf responses; discovery mode stays fully streamed.
+        flow.metadata["phase2_protobuf_buffered"] = True
+        response.stream = False
+        return
+
+    scanner = ProtobufStreamScanner(backtrack_bytes=PROTOBUF_BACKTRACK_BYTES)
+    completed = False
+
+    def scan_stream(chunk: bytes) -> bytes:
+        nonlocal completed
+        if chunk:
+            scanner.feed(chunk)
+        elif not completed:
+            completed = True
+            _emit_protobuf_scan(request.pretty_host, path, scanner)
+        return chunk
+
+    response.stream = scan_stream
+
+
+def response(flow: http.HTTPFlow) -> None:
+    if not flow.metadata.get("phase2_protobuf_buffered") or flow.response is None:
+        return
+
+    request = flow.request
+    response = flow.response
+    path = _safe_path(request.path)
+    body = response.get_content(strict=False) or b""
+
+    scanner = ProtobufStreamScanner(backtrack_bytes=PROTOBUF_BACKTRACK_BYTES)
+    scanner.feed(body)
+    _emit_protobuf_scan(request.pretty_host, path, scanner)
+
+    mutated, mutations = denature_ad_fields(
+        body,
+        PROTOBUF_BLOCK_FIELD_TAGS,
+        backtrack_bytes=PROTOBUF_BACKTRACK_BYTES,
+    )
+    if mutations:
+        response.set_content(mutated)
+        _emit(
+            "protobuf_response_mutation",
+            host=request.pretty_host,
+            path=path,
+            mutation_count=sum(mutations.values()),
+            mutated_fields={
+                str(field): count for field, count in mutations.items()
+            },
+        )
 
 
 def tls_clienthello(data: tls.ClientHelloData) -> None:
@@ -184,10 +331,12 @@ def _tls_metadata(data: tls.TlsData) -> dict[str, object]:
 
 
 def _tls_error_category(data: tls.TlsData) -> str:
-    # Raw library error strings can contain endpoint details. Persist only a
-    # stable category that is sufficient for the pinning go/no-go test.
     error = str(getattr(data.conn, "error", "") or "").lower()
-    if "unknown ca" in error or "bad certificate" in error or "certificate unknown" in error:
+    if (
+        "unknown ca" in error
+        or "bad certificate" in error
+        or "certificate unknown" in error
+    ):
         return "certificate_rejected"
     if "closed" in error or "eof" in error:
         return "connection_closed_during_handshake"
@@ -229,11 +378,25 @@ def tls_failed_server(data: tls.TlsData) -> None:
             **_tls_metadata(data),
         )
 
+
 if __name__ == "__main__":
     assert _safe_path("/watch?v=secret&token=hidden") == "/watch"
     assert _safe_path("https://example.test/a/b?q=private") == "/a/b"
-    assert _safe_path("/api/abcdefghijklmnopqrstuvwxyz0123456789ABCDEF") == "/api/<redacted>"
-    assert _safe_path("/vi/JdzAQSCbPN4/hq720.jpg") == "/vi/<redacted>/hq720.jpg"
+    assert (
+        _safe_path("/api/abcdefghijklmnopqrstuvwxyz0123456789ABCDEF")
+        == "/api/<redacted>"
+    )
+    assert (
+        _safe_path("/vi/JdzAQSCbPN4/hq720.jpg")
+        == "/vi/<redacted>/hq720.jpg"
+    )
     assert _matches_host("youtubei.googleapis.com")
-    assert not _matches_host("example.test")
+    assert _is_inner_tube_request(
+        "youtubei.googleapis.com", "/youtubei/v1/browse"
+    )
+    assert not _is_inner_tube_request(
+        "www.youtube.com", "/youtubei/v1/browse"
+    )
+    assert _is_protobuf_content_type("application/x-protobuf")
+    assert not PROTOBUF_BLOCKING_ENABLED or PROTOBUF_BLOCK_FIELD_TAGS
     assert _decode_alpn(b"h2") == "h2"
