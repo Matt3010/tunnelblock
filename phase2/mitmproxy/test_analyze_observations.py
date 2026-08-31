@@ -11,22 +11,25 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ObservationAnalysisTest(unittest.TestCase):
-    def test_protobuf_discovery_is_aggregated_without_hosts_or_paths(self):
+    def test_nearest_field_discovery_is_aggregated_without_hosts_or_paths(self):
         result = MODULE.summarize(
             [
                 '{"event":"http_request","host":"www.youtube.com","path":"/pagead/adview","http_version":"HTTP/2.0"}',
-                '{"event":"protobuf_response_scan","host":"youtubei.googleapis.com","path":"/youtubei/v1/browse","body_bytes":1800000,"markers":{"pagead":2},"candidate_fields":{"50195462":2,"49399797":1}}',
+                '{"event":"protobuf_response_scan","host":"youtubei.googleapis.com","path":"/youtubei/v1/browse","body_bytes":1800000,"markers":{"pagead":2},"nearest_fields":{"50195462":{"hits":2,"min_distance":11,"max_distance":17,"avg_distance":14.0}}}',
+                '{"event":"protobuf_response_scan","host":"youtubei.googleapis.com","path":"/youtubei/v1/player","body_bytes":200000,"markers":{"pagead":1},"nearest_fields":{"50195462":{"hits":1,"min_distance":9,"max_distance":9,"avg_distance":9.0}}}',
                 '{"event":"tls_failed_client","sni":"private.example","error_category":"certificate_rejected","transport":"tcp"}',
             ]
         )
-        self.assertEqual(result["protobuf"]["responses_scanned"], 1)
-        self.assertEqual(result["protobuf"]["bytes_scanned"], 1800000)
+        self.assertEqual(result["protobuf"]["responses_scanned"], 2)
+        self.assertEqual(result["protobuf"]["bytes_scanned"], 2000000)
         self.assertEqual(
-            result["protobuf"]["marker_occurrences"]["pagead"], 2
+            result["protobuf"]["marker_occurrences"]["pagead"], 3
         )
-        self.assertEqual(
-            result["protobuf"]["candidate_field_hits"]["50195462"], 2
-        )
+        stats = result["protobuf"]["nearest_field_stats"]["50195462"]
+        self.assertEqual(stats["hits"], 3)
+        self.assertEqual(stats["min_distance"], 9)
+        self.assertEqual(stats["max_distance"], 17)
+        self.assertEqual(stats["avg_distance"], 12.33)
         self.assertEqual(
             result["tls_failures"]["certificate_rejected"], 1
         )
