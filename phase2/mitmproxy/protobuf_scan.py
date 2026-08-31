@@ -215,6 +215,89 @@ def _distance_stats(
     }
 
 
+def _shared_chain_nodes(
+    chain_observations: list[
+        tuple[str, tuple[CandidateDetail, ...]]
+    ],
+    target_fields: tuple[int, ...] | list[int] | None = None,
+) -> list[
+    tuple[
+        CandidateDetail,
+        Counter[str],
+        dict[str, Counter[int]],
+    ]
+]:
+    """Return shared physical nodes from the selected ancestor chains only."""
+
+    targets = (
+        {
+            int(field)
+            for field in target_fields
+            if int(field) > 1
+        }
+        if target_fields is not None
+        else None
+    )
+    required_markers = set(MARKERS)
+
+    node_details: dict[
+        tuple[int, int, int, int],
+        CandidateDetail,
+    ] = {}
+    node_markers: dict[
+        tuple[int, int, int, int],
+        Counter[str],
+    ] = {}
+    node_depths: dict[
+        tuple[int, int, int, int],
+        dict[str, Counter[int]],
+    ] = {}
+
+    for marker_name, chain_details in chain_observations:
+        for depth, candidate in enumerate(chain_details):
+            field, _distance, tag_pos, payload_start, payload_end = (
+                candidate
+            )
+            if targets is not None and field not in targets:
+                continue
+
+            node_id = (
+                field,
+                tag_pos,
+                payload_start,
+                payload_end,
+            )
+            node_details[node_id] = candidate
+            node_markers.setdefault(node_id, Counter())[
+                marker_name
+            ] += 1
+            node_depths.setdefault(node_id, {}).setdefault(
+                marker_name,
+                Counter(),
+            )[depth] += 1
+
+    matches = []
+    for node_id, marker_hits in node_markers.items():
+        if not required_markers.issubset(marker_hits):
+            continue
+        matches.append(
+            (
+                node_details[node_id],
+                marker_hits,
+                node_depths[node_id],
+            )
+        )
+
+    return sorted(
+        matches,
+        key=lambda item: (
+            item[0][4] - item[0][3],
+            item[0][2],
+            item[0][0],
+        ),
+    )
+
+
 class ProtobufStreamScanner:
     """Scan uncompressed protobuf bytes in-flight without persisting payloads."""
 
@@ -280,6 +363,39 @@ class ProtobufStreamScanner:
         self._bytes_seen += len(chunk)
         self._tail = combined[-self.tail_bytes :]
 
+    def _chain_observations(
+        self,
+    ) -> list[tuple[str, tuple[CandidateDetail, ...]]]:
+        observations = []
+        for marker_name, observed_candidates in self._observations:
+            valid = [
+                candidate
+                for candidate in observed_candidates
+                if candidate[4] <= self._bytes_seen
+            ]
+            valid.sort(
+                key=lambda item: (item[1], item[0], item[2])
+            )
+            chain_details = _ancestor_chain_details(valid)
+            if chain_details:
+                observations.append((marker_name, chain_details))
+        return observations
+
+    def shared_nodes(
+        self,
+        target_fields: tuple[int, ...] | list[int] | None = None,
+    ) -> list[
+        tuple[
+            CandidateDetail,
+            Counter[str],
+            dict[str, Counter[int]],
+        ]
+    ]:
+        return _shared_chain_nodes(
+            self._chain_observations(),
+            target_fields,
+        )
+
     def result(self, max_fields: int = 16) -> dict[str, object]:
         candidate_fields: Counter[int] = Counter()
         nearest_fields: Counter[int] = Counter()
@@ -294,9 +410,6 @@ class ProtobufStreamScanner:
         marker_distance_min: dict[str, dict[int, int]] = {}
         marker_distance_max: dict[str, dict[int, int]] = {}
         ancestor_chains: dict[str, Counter[str]] = {}
-        chain_observations: list[
-            tuple[str, tuple[CandidateDetail, ...]]
-        ] = []
 
         def record_distance(
             marker_name: str,
@@ -363,7 +476,6 @@ class ProtobufStreamScanner:
 
             chain_details = _ancestor_chain_details(valid)
             if chain_details:
-                chain_observations.append((marker_name, chain_details))
                 chain_key = ">".join(
                     str(candidate[0])
                     for candidate in chain_details
@@ -415,39 +527,11 @@ class ProtobufStreamScanner:
             for marker, chains in sorted(ancestor_chains.items())
         }
 
-        node_markers: dict[
-            tuple[int, int, int, int],
-            Counter[str],
-        ] = {}
-        node_depths: dict[
-            tuple[int, int, int, int],
-            dict[str, Counter[int]],
-        ] = {}
-        for marker_name, chain_details in chain_observations:
-            for depth, candidate in enumerate(chain_details):
-                field, _distance, tag_pos, payload_start, payload_end = (
-                    candidate
-                )
-                node_id = (
-                    field,
-                    tag_pos,
-                    payload_start,
-                    payload_end,
-                )
-                node_markers.setdefault(node_id, Counter())[
-                    marker_name
-                ] += 1
-                node_depths.setdefault(node_id, {}).setdefault(
-                    marker_name,
-                    Counter(),
-                )[depth] += 1
-
         shared_fields: dict[int, dict[str, object]] = {}
-        for node_id, marker_hits in node_markers.items():
-            if len(marker_hits) < 2:
-                continue
-
-            field, _tag_pos, payload_start, payload_end = node_id
+        for candidate, marker_hits, marker_depths in self.shared_nodes():
+            field, _distance, _tag_pos, payload_start, payload_end = (
+                candidate
+            )
             payload_bytes = max(0, payload_end - payload_start)
             state = shared_fields.setdefault(
                 field,
@@ -483,7 +567,7 @@ class ProtobufStreamScanner:
 
             aggregate_depths = state["depths"]
             assert isinstance(aggregate_depths, dict)
-            for marker_name, depths in node_depths[node_id].items():
+            for marker_name, depths in marker_depths.items():
                 target_depths = aggregate_depths.setdefault(
                     marker_name,
                     Counter(),
@@ -560,94 +644,37 @@ def shared_marker_field_nodes(
     target_fields: tuple[int, ...] | list[int],
     backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
 ) -> list[CandidateDetail]:
-    """Return target protobuf nodes that physically contain every ad marker type.
+    """Return exactly the shared nodes selected by the diagnostic scanner."""
 
-    Node identity is based on field number plus tag/payload coordinates, so a
-    leaf field and a same-number parent remain distinct. A node is eligible only
-    when the same physical payload encloses at least one occurrence of every
-    marker in MARKERS.
-    """
-
-    targets = {
-        int(field)
-        for field in target_fields
-        if int(field) > 1
-    }
-    if not data or not targets:
-        return []
-
-    marker_nodes: dict[
-        tuple[int, int, int, int],
-        set[str],
-    ] = {}
-    node_details: dict[
-        tuple[int, int, int, int],
-        CandidateDetail,
-    ] = {}
-
-    for marker_name, marker in MARKERS.items():
-        search_from = 0
-        while True:
-            marker_pos = data.find(marker, search_from)
-            if marker_pos < 0:
-                break
-
-            for candidate in _length_delimited_candidate_details(
-                data,
-                marker_pos,
-                len(marker),
-                backtrack_bytes,
-                require_complete_payload=True,
-            ):
-                field, _distance, tag_pos, payload_start, payload_end = (
-                    candidate
-                )
-                if field not in targets:
-                    continue
-                node_id = (
-                    field,
-                    tag_pos,
-                    payload_start,
-                    payload_end,
-                )
-                marker_nodes.setdefault(node_id, set()).add(marker_name)
-                node_details[node_id] = candidate
-
-            search_from = marker_pos + 1
-
-    required = set(MARKERS)
-    matches = [
-        node_details[node_id]
-        for node_id, marker_names in marker_nodes.items()
-        if required.issubset(marker_names)
-    ]
-    return sorted(
-        matches,
-        key=lambda item: (
-            item[4] - item[3],
-            item[2],
-            item[0],
-        ),
-    )
-
-
-def denature_shared_ad_fields(
-    data: bytes,
-    target_fields: tuple[int, ...] | list[int],
-    backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
-) -> tuple[bytes, dict[int, int]]:
-    """Denature only validated target nodes containing all configured ad markers.
-
-    This avoids mutating same-number leaf fields that contain only one marker.
-    Each physical protobuf node is mutated at most once.
-    """
-
-    nodes = shared_marker_field_nodes(
-        data,
-        target_fields,
+    scanner = ProtobufStreamScanner(
         backtrack_bytes=backtrack_bytes,
     )
-    if not nodes:
+    scanner.feed(data)
+    return [
+        candidate
+        for candidate, _marker_hits, _depths in scanner.shared_nodes(
+            target_fields
+        )
+    ]
+
+
+def planned_field_counts(
+    nodes: list[CandidateDetail],
+) -> dict[int, int]:
+    counts: Counter[int] = Counter(
+        candidate[0]
+        for candidate in nodes
+    )
+    return dict(sorted(counts.items()))
+
+
+def denature_planned_nodes(
+    data: bytes,
+    nodes: list[CandidateDetail],
+) -> tuple[bytes, dict[int, int]]:
+    """Denature an exact preselected node plan; callers must verify counts."""
+
+    if not data or not nodes:
         return data, {}
 
     body = bytearray(data)
@@ -664,6 +691,21 @@ def denature_shared_ad_fields(
         mutations[field] += 1
 
     return bytes(body), dict(sorted(mutations.items()))
+
+
+def denature_shared_ad_fields(
+    data: bytes,
+    target_fields: tuple[int, ...] | list[int],
+    backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
+) -> tuple[bytes, dict[int, int]]:
+    """Compatibility wrapper using the same structural plan as diagnostics."""
+
+    nodes = shared_marker_field_nodes(
+        data,
+        target_fields,
+        backtrack_bytes=backtrack_bytes,
+    )
+    return denature_planned_nodes(data, nodes)
 
 
 def denature_ad_fields(
