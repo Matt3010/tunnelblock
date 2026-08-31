@@ -57,14 +57,14 @@
 - [x] Reversible QUIC/UDP 443 toggle
 - [x] IPv6 fail-closed policy during interception tests
 - [x] Keep interception disabled by default
-- [ ] Run the real iPhone TLS/pinning/QUIC go/no-go test
+- [x] Run the real iPhone TLS/pinning/QUIC go/no-go test
 
 ## M6 - YouTube experimental
 
 - [x] DNS-only limitation documented
 - [x] Legacy labeled DNS capture backend retained for diagnostics
-- [ ] Test official YouTube iOS TLS interception
-- [ ] Determine whether certificate pinning prevents inspection
-- [ ] Compare ad and normal-video request metadata
-- [ ] Identify request-level signals only if interception is viable
+- [x] Test official YouTube iOS TLS interception
+- [x] Determine that app-wide certificate pinning does not prevent inspection
+- [x] Add aggregate comparison of ad-candidate and playback metadata
+- [x] Identify candidate request-level signals without blocking
 - [ ] Add blocking rules only after false-positive validation

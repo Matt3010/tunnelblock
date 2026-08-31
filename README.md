@@ -89,13 +89,21 @@ It is designed to be safe by default:
 
 See [docs/HTTPS-OBSERVATION.md](docs/HTTPS-OBSERVATION.md) for the go/no-go test and rollback commands.
 
+Captured metadata can be summarized without exposing individual hosts or paths:
+
+```bash
+python3 scripts/analyze-youtube-observations.py
+```
+
+The output labels only candidate ad/playback signals. It does not classify or block requests.
+
 ## Deployment
 
 The updater watches `master`. A deployment runs the current `ops/deploy.sh`, which:
 
 1. validates the Compose configuration;
 2. builds the complete stack;
-3. syntax-checks WireGuard scripts;
+3. syntax-checks WireGuard scripts and tests the Phase-2 metadata analyzer;
 4. runs DNS tests;
 5. runs TypeScript checks for DNS, Telegram and updater;
 6. recreates the stack only after pre-flight checks pass;
@@ -108,4 +116,4 @@ Persistent data is not reset during this process.
 
 DNS-only filtering cannot safely distinguish YouTube ads from normal video delivery when both use shared Google infrastructure.
 
-The existing DNS capture tooling is retained for diagnostics, but the next YouTube phase is explicitly measurement-first: transparent HTTPS interception will only be considered after a go/no-go test for TLS interception, certificate pinning and QUIC behavior. No claim is made that the official YouTube iOS app can be filtered at request level until that is demonstrated.
+The real iPhone go/no-go test confirmed that the official app can be observed over TCP after QUIC is disabled. Candidate ad and playback endpoints are distinguishable in metadata, but no claim is made yet that blocking them is safe.

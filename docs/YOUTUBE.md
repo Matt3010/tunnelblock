@@ -32,4 +32,12 @@ The lab is still measurement-only:
 
 See `docs/HTTPS-OBSERVATION.md` for the diagnostic sequence.
 
-Request-level ad filtering is out of scope until the real iPhone test demonstrates that HTTPS inspection is viable and that ad traffic can be distinguished without breaking normal playback.
+The real iPhone test demonstrated that HTTPS inspection is viable when QUIC is forced to fall back to TCP. Successful playback traffic and ad-related control/telemetry endpoints were both visible. This rules out app-wide certificate pinning, but does not prove that any candidate can be blocked safely.
+
+Aggregate the minimized log with:
+
+```bash
+python3 scripts/analyze-youtube-observations.py
+```
+
+The report intentionally uses candidate categories and never enables blocking.

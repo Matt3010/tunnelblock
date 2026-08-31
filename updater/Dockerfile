@@ -1,6 +1,6 @@
 FROM node:24-alpine
 
-RUN apk add --no-cache git docker-cli docker-cli-compose curl
+RUN apk add --no-cache git docker-cli docker-cli-compose curl python3
 
 ARG UPDATER_BUILD_SHA=dev
 ENV UPDATER_BUILD_SHA=$UPDATER_BUILD_SHA

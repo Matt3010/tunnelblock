@@ -57,12 +57,15 @@ def _safe_path(raw: str) -> str:
 
     path = parsed.path or "/"
     safe_segments = []
-    for segment in path.split("/"):
+    segments = path.split("/")
+    for index, segment in enumerate(segments):
+        previous = segments[index - 1] if index else ""
         token_like = (
             len(segment) > 48
             or "=" in segment
             or (segment.count(".") >= 2 and len(segment) > 20)
-            or bool(re.fullmatch(r"[A-Za-z0-9_-]{32,}", segment))
+            or bool(re.fullmatch(r"[A-Za-z0-9_-]{16,}", segment))
+            or (previous in {"vi", "vi_webp"} and bool(re.fullmatch(r"[A-Za-z0-9_-]{8,}", segment)))
         )
         safe_segments.append("<redacted>" if token_like else segment)
 
@@ -230,6 +233,7 @@ if __name__ == "__main__":
     assert _safe_path("/watch?v=secret&token=hidden") == "/watch"
     assert _safe_path("https://example.test/a/b?q=private") == "/a/b"
     assert _safe_path("/api/abcdefghijklmnopqrstuvwxyz0123456789ABCDEF") == "/api/<redacted>"
+    assert _safe_path("/vi/JdzAQSCbPN4/hq720.jpg") == "/vi/<redacted>/hq720.jpg"
     assert _matches_host("youtubei.googleapis.com")
     assert not _matches_host("example.test")
     assert _decode_alpn(b"h2") == "h2"
