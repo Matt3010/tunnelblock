@@ -13,6 +13,7 @@ MARKERS: dict[str, bytes] = {
 }
 
 CandidateDetail = tuple[int, int, int, int, int]
+RemovalPlan = tuple[CandidateDetail, tuple[CandidateDetail, ...]]
 
 
 def decode_varint(
@@ -396,6 +397,58 @@ class ProtobufStreamScanner:
             target_fields,
         )
 
+    def removal_plans(
+        self,
+        target_fields: tuple[int, ...] | list[int],
+    ) -> list[RemovalPlan]:
+        """Return shared target nodes with one verified common ancestor chain."""
+
+        chain_observations = self._chain_observations()
+        shared = self.shared_nodes(target_fields)
+        plans: list[RemovalPlan] = []
+
+        def node_id(candidate: CandidateDetail) -> tuple[int, int, int, int]:
+            return (
+                candidate[0],
+                candidate[2],
+                candidate[3],
+                candidate[4],
+            )
+
+        for target, _marker_hits, _depths in shared:
+            target_id = node_id(target)
+            suffixes: list[tuple[str, tuple[CandidateDetail, ...]]] = []
+
+            for marker_name, chain in chain_observations:
+                for index, candidate in enumerate(chain):
+                    if node_id(candidate) == target_id:
+                        suffixes.append(
+                            (marker_name, tuple(chain[index + 1 :]))
+                        )
+                        break
+
+            if not set(MARKERS).issubset(
+                marker_name for marker_name, _suffix in suffixes
+            ):
+                continue
+
+            identities = {
+                tuple(node_id(candidate) for candidate in suffix)
+                for _marker_name, suffix in suffixes
+            }
+            if len(identities) != 1:
+                continue
+
+            plans.append((target, suffixes[0][1]))
+
+        return sorted(
+            plans,
+            key=lambda plan: (
+                plan[0][2],
+                plan[0][0],
+            ),
+        )
+
     def result(self, max_fields: int = 16) -> dict[str, object]:
         candidate_fields: Counter[int] = Counter()
         nearest_fields: Counter[int] = Counter()
@@ -706,6 +759,181 @@ def denature_shared_ad_fields(
         backtrack_bytes=backtrack_bytes,
     )
     return denature_planned_nodes(data, nodes)
+
+
+def _candidate_id(
+    candidate: CandidateDetail,
+) -> tuple[int, int, int, int]:
+    return (
+        candidate[0],
+        candidate[2],
+        candidate[3],
+        candidate[4],
+    )
+
+
+def _validated_field_header(
+    data: bytes,
+    candidate: CandidateDetail,
+) -> tuple[int, int]:
+    field, _distance, tag_pos, payload_start, payload_end = candidate
+    key_decoded = decode_varint(data, tag_pos, max_bytes=5)
+    if key_decoded is None:
+        raise ValueError("invalid protobuf key")
+    key, key_end = key_decoded
+    if (key >> 3) != field or (key & 0x07) != 2:
+        raise ValueError("candidate key mismatch")
+
+    length_decoded = decode_varint(data, key_end, max_bytes=10)
+    if length_decoded is None:
+        raise ValueError("invalid protobuf length")
+    payload_length, decoded_payload_start = length_decoded
+    if decoded_payload_start != payload_start:
+        raise ValueError("candidate payload start mismatch")
+    if payload_start + payload_length != payload_end:
+        raise ValueError("candidate payload end mismatch")
+    if not (0 <= tag_pos < payload_start <= payload_end <= len(data)):
+        raise ValueError("candidate bounds invalid")
+    return key_end, decoded_payload_start
+
+
+def planned_removal_counts(
+    plans: list[RemovalPlan],
+) -> dict[int, int]:
+    counts: Counter[int] = Counter(plan[0][0] for plan in plans)
+    return dict(sorted(counts.items()))
+
+
+def remove_planned_nodes(
+    data: bytes,
+    plans: list[RemovalPlan],
+) -> tuple[bytes, dict[int, int], int]:
+    """Remove exact target fields and rebuild only their verified ancestors."""
+
+    if not data or not plans:
+        return data, {}, 0
+
+    candidates: dict[
+        tuple[int, int, int, int],
+        CandidateDetail,
+    ] = {}
+    children: dict[
+        tuple[int, int, int, int],
+        set[tuple[int, int, int, int]],
+    ] = {}
+    parents: dict[
+        tuple[int, int, int, int],
+        tuple[int, int, int, int],
+    ] = {}
+    remove_ids: set[tuple[int, int, int, int]] = set()
+    removed_fields: Counter[int] = Counter()
+
+    for target, ancestors in plans:
+        chain = (target, *ancestors)
+        target_id = _candidate_id(target)
+        if target_id in remove_ids:
+            continue
+        remove_ids.add(target_id)
+        removed_fields[target[0]] += 1
+
+        for candidate in chain:
+            candidate_id = _candidate_id(candidate)
+            existing = candidates.get(candidate_id)
+            if existing is not None and existing != candidate:
+                raise ValueError("candidate identity collision")
+            candidates[candidate_id] = candidate
+            _validated_field_header(data, candidate)
+
+        for child, parent in zip(chain, chain[1:]):
+            child_id = _candidate_id(child)
+            parent_id = _candidate_id(parent)
+            child_candidate = candidates[child_id]
+            parent_candidate = candidates[parent_id]
+            if not (
+                parent_candidate[3] <= child_candidate[2]
+                and child_candidate[4] <= parent_candidate[4]
+            ):
+                raise ValueError("ancestor chain containment mismatch")
+            previous_parent = parents.get(child_id)
+            if previous_parent is not None and previous_parent != parent_id:
+                raise ValueError("node has conflicting parents")
+            parents[child_id] = parent_id
+            children.setdefault(parent_id, set()).add(child_id)
+
+    for remove_id in remove_ids:
+        current = parents.get(remove_id)
+        while current is not None:
+            if current in remove_ids:
+                raise ValueError("nested removal targets are not allowed")
+            current = parents.get(current)
+
+    def render(node_id: tuple[int, int, int, int]) -> bytes:
+        candidate = candidates[node_id]
+        field, _distance, tag_pos, payload_start, payload_end = candidate
+        if node_id in remove_ids:
+            return b""
+
+        key_end, _decoded_payload_start = _validated_field_header(
+            data,
+            candidate,
+        )
+        key_bytes = data[tag_pos:key_end]
+
+        child_ids = sorted(
+            children.get(node_id, set()),
+            key=lambda item: candidates[item][2],
+        )
+        cursor = payload_start
+        payload_parts: list[bytes] = []
+        previous_end = payload_start
+
+        for child_id in child_ids:
+            child = candidates[child_id]
+            child_start = child[2]
+            child_end = child[4]
+            if child_start < previous_end or child_end > payload_end:
+                raise ValueError("overlapping or out-of-bounds child")
+            payload_parts.append(data[cursor:child_start])
+            payload_parts.append(render(child_id))
+            cursor = child_end
+            previous_end = child_end
+
+        payload_parts.append(data[cursor:payload_end])
+        new_payload = b"".join(payload_parts)
+        return key_bytes + encode_varint(len(new_payload)) + new_payload
+
+    root_ids = [
+        node_id
+        for node_id in candidates
+        if node_id not in parents
+    ]
+    root_ids.sort(key=lambda item: candidates[item][2])
+
+    cursor = 0
+    output: list[bytes] = []
+    previous_end = 0
+    for root_id in root_ids:
+        root = candidates[root_id]
+        root_start = root[2]
+        root_end = root[4]
+        if root_start < previous_end:
+            raise ValueError("overlapping root rewrite spans")
+        output.append(data[cursor:root_start])
+        output.append(render(root_id))
+        cursor = root_end
+        previous_end = root_end
+    output.append(data[cursor:])
+
+    rewritten = b"".join(output)
+    removed_bytes = len(data) - len(rewritten)
+    if removed_bytes <= 0:
+        raise ValueError("structural removal did not shrink response")
+
+    return (
+        rewritten,
+        dict(sorted(removed_fields.items())),
+        removed_bytes,
+    )
 
 
 def denature_ad_fields(
