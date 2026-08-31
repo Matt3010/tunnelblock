@@ -97,14 +97,14 @@ unchanged with exact planned/applied counts. Treat that branch as descriptive ad
 metadata, not as evidence of the player decision.
 
 The current experiment uses the public Onesie schema rather than mirroring the
-private Maasea Worker. It acquires keys from the exact config path
-`1>16>7>138536474>146311580`, keeps them only in memory, and verifies the request
-`encryptedClientKey`. On the first eligible request it changes only
-`InnertubeRequest.enable_ad_placements_preroll` (field 13) from true to false.
+private Maasea Worker. On each `initplayback` request it validates the exact
+`OnesieRequest.innertube_request` structure and, on the first applicable request,
+changes only `InnertubeRequest.enable_ad_placements_preroll` (field 13) from true
+to false. This plaintext envelope field does not depend on cached hot-config keys.
 
 The replacement has the same encoded size and requires exact planned/applied
-counts. Missing keys, an absent or already-false flag, unexpected wire type,
-non-boolean value, malformed protobuf, or any size mismatch forwards the original
+counts. An absent or already-false flag, unexpected wire type, non-boolean value,
+malformed protobuf, or any size mismatch forwards the original
 request. Responses are never modified. The experiment is one-shot per proxy
 process and disabled in Compose.
 
