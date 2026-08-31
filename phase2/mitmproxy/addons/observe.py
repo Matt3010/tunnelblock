@@ -15,11 +15,34 @@ LOG_PATH = Path(
     )
 )
 MAX_BYTES = int(os.environ.get("OBSERVATION_MAX_BYTES", str(25 * 1024 * 1024)))
+HOST_SUFFIXES = tuple(
+    item.strip().lower().lstrip(".")
+    for item in os.environ.get(
+        "OBSERVATION_HOST_SUFFIXES",
+        "youtube.com,googlevideo.com,googleapis.com,ytimg.com,ggpht.com,"
+        "doubleclick.net,googlesyndication.com,googleadservices.com",
+    ).split(",")
+    if item.strip()
+)
 _lock = threading.Lock()
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _matches_host(host: str | None) -> bool:
+    if not host:
+        return False
+
+    normalized = host.rstrip(".").lower()
+    if "*" in HOST_SUFFIXES:
+        return True
+
+    return any(
+        normalized == suffix or normalized.endswith("." + suffix)
+        for suffix in HOST_SUFFIXES
+    )
 
 
 def _safe_path(raw: str) -> str:
@@ -69,6 +92,8 @@ def _emit(event: str, **fields: object) -> None:
 
 def requestheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
+    if not _matches_host(request.pretty_host):
+        return
     _emit(
         "http_request",
         host=request.pretty_host,
@@ -83,6 +108,8 @@ def requestheaders(flow: http.HTTPFlow) -> None:
 def responseheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
     response = flow.response
+    if not _matches_host(request.pretty_host):
+        return
     _emit(
         "http_response",
         host=request.pretty_host,
@@ -94,6 +121,9 @@ def responseheaders(flow: http.HTTPFlow) -> None:
 
 
 def tls_clienthello(data: tls.ClientHelloData) -> None:
+    if not _matches_host(data.client_hello.sni):
+        return
+
     alpn = []
     for item in data.client_hello.alpn_protocols:
         try:
@@ -111,3 +141,5 @@ def tls_clienthello(data: tls.ClientHelloData) -> None:
 if __name__ == "__main__":
     assert _safe_path("/watch?v=secret&token=hidden") == "/watch"
     assert _safe_path("https://example.test/a/b?q=private") == "/a/b"
+    assert _matches_host("youtubei.googleapis.com")
+    assert not _matches_host("example.test")
