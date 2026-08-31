@@ -36,7 +36,7 @@ case "$ACTION" in
   status)
     CID="$(container_id)"
     if [ -z "$CID" ]; then
-      echo "YouTube UMP filter: disabled"
+      echo "YouTube preroll request test: disabled"
     else
       docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CID" \
         | sed -n '/^YOUTUBE_UMP_FILTER_ENABLED=/p;/^OBSERVATION_LOG_ENABLED=/p'
