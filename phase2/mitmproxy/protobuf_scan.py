@@ -61,8 +61,9 @@ def enclosing_length_delimited_candidates(
 ) -> list[tuple[int, int, int]]:
     """Return plausible enclosing protobuf fields as (field, distance, tag_pos).
 
-    A candidate is accepted only when its decoded length-delimited payload
-    actually contains the complete marker. Results are nearest-first.
+    A candidate is accepted only when its decoded length-delimited payload is
+    fully present in the observed buffer and actually contains the complete
+    marker. Results are nearest-first.
     """
 
     if marker_start < 0 or marker_length <= 0:
@@ -87,7 +88,11 @@ def enclosing_length_delimited_candidates(
             continue
         payload_length, payload_start = length_decoded
         payload_end = payload_start + payload_length
-        if payload_start <= marker_start and marker_end <= payload_end:
+        if (
+            payload_end <= len(data)
+            and payload_start <= marker_start
+            and marker_end <= payload_end
+        ):
             distance = marker_start - pos
             if distance <= backtrack_bytes:
                 candidates.append((field_number, distance, pos))
