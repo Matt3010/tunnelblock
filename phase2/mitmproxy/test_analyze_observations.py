@@ -117,15 +117,43 @@ class ObservationAnalysisTest(unittest.TestCase):
     def test_mutations_are_reported_explicitly(self):
         result = MODULE.summarize(
             [
-                '{"event":"protobuf_response_mutation","mutation_count":2,"mutated_fields":{"50195462":2}}'
+                '{"event":"protobuf_response_mutation","mutation_count":2,"planned_fields":{"50195462":2},"mutated_fields":{"50195462":2}}'
             ]
         )
         self.assertTrue(result["blocking_observed"])
         self.assertEqual(result["protobuf"]["mutations"], 2)
         self.assertEqual(
+            result["protobuf"]["planned_field_hits"]["50195462"],
+            2,
+        )
+        self.assertEqual(
             result["protobuf"]["mutated_field_hits"]["50195462"],
             2,
         )
+        self.assertEqual(
+            result["protobuf"]["mutation_rejections"],
+            0,
+        )
+
+    def test_mutation_plan_rejection_is_reported(self):
+        result = MODULE.summarize(
+            [
+                '{"event":"protobuf_response_mutation_rejected","reason":"planned_mutated_mismatch","planned_fields":{"14":6},"mutated_fields":{"14":5}}'
+            ]
+        )
+        self.assertEqual(
+            result["protobuf"]["mutation_rejections"],
+            1,
+        )
+        self.assertEqual(
+            result["protobuf"]["planned_field_hits"]["14"],
+            6,
+        )
+        self.assertEqual(
+            result["protobuf"]["mutations"],
+            0,
+        )
+        self.assertFalse(result["blocking_observed"])
 
     def test_invalid_json_is_counted(self):
         result = MODULE.summarize(["not-json", "[]"])
