@@ -279,11 +279,14 @@ def summarize(lines: list[str]) -> dict[str, object]:
     protobuf_shared_ancestors: dict[str, dict[str, object]] = {}
     protobuf_planned_fields: Counter[str] = Counter()
     protobuf_mutated_fields: Counter[str] = Counter()
+    protobuf_neutralized_fields: Counter[str] = Counter()
     protobuf_mutation_rejections = 0
+    protobuf_neutralization_rejections = 0
     protobuf_responses_scanned = 0
     protobuf_responses_skipped = 0
     protobuf_bytes_scanned = 0
     protobuf_mutations = 0
+    protobuf_neutralizations = 0
     invalid_lines = 0
 
     for line in lines:
@@ -376,10 +379,33 @@ def summarize(lines: list[str]) -> dict[str, object]:
                 protobuf_planned_fields,
                 record.get("planned_fields"),
             )
+        elif event == "protobuf_response_neutralization":
+            try:
+                protobuf_neutralizations += int(
+                    record.get("neutralization_count", 0)
+                )
+            except (TypeError, ValueError):
+                pass
+            _counter_from_mapping(
+                protobuf_planned_fields,
+                record.get("planned_fields"),
+            )
+            _counter_from_mapping(
+                protobuf_neutralized_fields,
+                record.get("neutralized_fields"),
+            )
+        elif event == "protobuf_response_neutralization_rejected":
+            protobuf_neutralization_rejections += 1
+            _counter_from_mapping(
+                protobuf_planned_fields,
+                record.get("planned_fields"),
+            )
 
     return {
         "classification": "protobuf_discovery_only",
-        "blocking_observed": protobuf_mutations > 0,
+        "blocking_observed": (
+            protobuf_mutations > 0 or protobuf_neutralizations > 0
+        ),
         "records": sum(events.values()),
         "invalid_lines": invalid_lines,
         "events": dict(sorted(events.items())),
@@ -437,6 +463,10 @@ def summarize(lines: list[str]) -> dict[str, object]:
             ),
             "mutations": protobuf_mutations,
             "mutation_rejections": protobuf_mutation_rejections,
+            "neutralizations": protobuf_neutralizations,
+            "neutralization_rejections": (
+                protobuf_neutralization_rejections
+            ),
             "planned_field_hits": dict(
                 sorted(
                     protobuf_planned_fields.items(),
@@ -446,6 +476,12 @@ def summarize(lines: list[str]) -> dict[str, object]:
             "mutated_field_hits": dict(
                 sorted(
                     protobuf_mutated_fields.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ),
+            "neutralized_field_hits": dict(
+                sorted(
+                    protobuf_neutralized_fields.items(),
                     key=lambda item: (-item[1], item[0]),
                 )
             ),
