@@ -16,3 +16,20 @@ YouTube app. Background iOS/app activity can therefore contaminate any DNS-level
 Any future YouTube work must first verify whether the official iOS app can be observed safely at
 the HTTPS request layer, including TLS certificate pinning and QUIC behavior. DNS-only domain
 blocking remains unsuitable for shared Google/YouTube delivery hostnames.
+
+
+## Phase 2 observation lab
+
+The repository now includes a transparent HTTPS observation lab behind the working WireGuard tunnel.
+
+The lab is still measurement-only:
+
+- no request is blocked;
+- interception is disabled by default;
+- QUIC blocking is disabled by default;
+- only metadata for YouTube-related hosts is persisted;
+- the test first determines whether the official YouTube iOS app accepts the private CA or rejects it through certificate pinning.
+
+See `docs/HTTPS-OBSERVATION.md` for the diagnostic sequence.
+
+Request-level ad filtering is out of scope until the real iPhone test demonstrates that HTTPS inspection is viable and that ad traffic can be distinguished without breaking normal playback.
