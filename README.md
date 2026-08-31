@@ -89,13 +89,15 @@ It is designed to be safe by default:
 
 See [docs/HTTPS-OBSERVATION.md](docs/HTTPS-OBSERVATION.md) for the go/no-go test and rollback commands.
 
-Captured metadata can be summarized without exposing individual hosts or paths:
+Captured metadata can be summarized without exposing individual hosts, paths or payloads:
 
 ```bash
 python3 scripts/analyze-youtube-observations.py
 ```
 
-The output labels only candidate ad/playback signals. It does not classify or block requests.
+The report now focuses on InnerTube protobuf discovery: aggregate ad-marker counts and schema-free candidate field numbers found near those markers. The old path-level ad/playback classifier was removed after real-device temporal testing showed that the same endpoint families occur during both ads and normal content.
+
+The protobuf mutation mechanism is present but inert by default. It requires both `PROTOBUF_BLOCKING_ENABLED=true` and an explicit, validated `PROTOBUF_BLOCK_FIELD_TAGS` list; the repository ships with blocking disabled and an empty field list.
 
 ## Deployment
 
@@ -116,4 +118,4 @@ Persistent data is not reset during this process.
 
 DNS-only filtering cannot safely distinguish YouTube ads from normal video delivery when both use shared Google infrastructure.
 
-The real iPhone go/no-go test confirmed that the official app can be observed over TCP after QUIC is disabled. Candidate ad and playback endpoints are distinguishable in metadata, but no claim is made yet that blocking them is safe.
+The real iPhone go/no-go test confirmed that the official app can be observed over TCP after QUIC is disabled. Temporal comparison then showed that request-path categories such as playback, page-ad and telemetry endpoints overlap across ad and normal-content windows, so they are not treated as safe blocking signals. The current experiment instead discovers ad-bearing InnerTube protobuf fields before any mutation is enabled.
