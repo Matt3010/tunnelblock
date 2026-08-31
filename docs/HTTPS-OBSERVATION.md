@@ -60,9 +60,10 @@ Recorded fields can include:
 
 - timestamp;
 - TLS SNI and ALPN offered by the client;
+- negotiated TLS version, ALPN, cipher, transport and connection error metadata;
 - HTTP host;
 - method;
-- URL path **without query string**;
+- URL path **without query string**, with long/token-like path segments redacted;
 - response status;
 - HTTP version.
 
@@ -77,6 +78,8 @@ The addon does **not** persist:
 - response bodies.
 
 The metadata log rotates at approximately 25 MiB.
+
+`mitmdump` runs with `flow_detail=0`, so its normal request/response flow summaries are not written to Docker stdout. The JSONL file above is the canonical observation log; container logs are reserved for proxy/runtime failures.
 
 ## Architecture
 
@@ -126,7 +129,7 @@ HTTPS IPv4 interception: disabled
 QUIC IPv4 UDP/443: allowed
 ```
 
-The observer is started only for an explicit HTTPS test or briefly while preparing the CA. Normal updater deployments stop it and leave it inactive.
+The observer is started only for an explicit HTTPS test or briefly while preparing the CA. Normal updater deployments remove the stopped lab container before recreating WireGuard, while leaving `data/mitmproxy/` untouched; this avoids stale network-namespace references and leaves the lab inactive.
 
 ## Public CA export
 
@@ -205,7 +208,7 @@ Inspect:
 
 ```bash
 tail -n 200 data/mitmproxy/observations/metadata.jsonl
-docker compose logs --tail=100 mitmproxy
+docker compose --profile https-lab logs --tail=100 mitmproxy
 ```
 
 Interpretation:
