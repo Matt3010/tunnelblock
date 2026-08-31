@@ -177,7 +177,12 @@ def _emit_protobuf_scan(
         path=path,
         body_bytes=result["body_bytes"],
         markers=result["markers"],
+        markers_without_candidate=result["markers_without_candidate"],
         candidate_fields=result["candidate_fields"],
+        nearest_candidate_fields=result["nearest_candidate_fields"],
+        nearest_candidate_distance_bytes=result[
+            "nearest_candidate_distance_bytes"
+        ],
         blocking_enabled=PROTOBUF_BLOCKING_ENABLED,
     )
 

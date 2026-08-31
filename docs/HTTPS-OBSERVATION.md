@@ -248,7 +248,9 @@ The real-device test passed. With QUIC allowed, part of the official YouTube iOS
 
 This is a technical go for deeper inspection only. A subsequent temporal ad/content test showed that path-level categories overlap across both phases: normal playback uses the same `googlevideo.com` delivery endpoints and ad-related telemetry can arrive during normal content. Those path labels are therefore no longer treated as prospective blocking rules.
 
-The next validation target is the InnerTube protobuf layer. Discovery mode must first show stable ad markers and repeatable candidate field numbers on the current iOS client before the disabled mutation path is allowed to touch traffic.
+The next validation target is the InnerTube protobuf layer. A first real temporal capture already showed 18 `/pagead/` markers in the ad window and none in the subsequent normal-content window, so protobuf marker detection is a substantially cleaner discriminator than HTTP path categories.
+
+Field selection remains intentionally unresolved. The scanner now reports the nearest decoded length-delimited field that actually encloses each marker, plus min/max/average byte distance. Only repeated nearest-field evidence across ad captures, combined with zero/benign evidence in no-ad captures, can promote a field into the explicit mutation allowlist.
 
 ## Restore normal VPN behavior
 

@@ -68,6 +68,8 @@
 - [x] Compare ad and normal-content request metadata on a real iPhone
 - [x] Reject path-level ad/playback categories as unsafe blocking signals
 - [x] Add streaming InnerTube protobuf marker/field discovery
+- [x] Validate protobuf ad-marker discrimination on a real iPhone capture
+- [x] Rank nearest verified enclosing protobuf fields and distances
 - [x] Add protobuf field-denaturing mechanism behind disabled interlocks
 - [ ] Validate stable current-iOS candidate field numbers across repeated ad/no-ad captures
 - [ ] Run false-positive playback validation with an explicitly configured field list
