@@ -95,7 +95,7 @@ Captured metadata can be summarized without exposing individual hosts, paths or 
 python3 scripts/analyze-youtube-observations.py
 ```
 
-The report now focuses on InnerTube protobuf discovery: aggregate ad-marker counts and schema-free candidate field numbers found near those markers. The old path-level ad/playback classifier was removed after real-device temporal testing showed that the same endpoint families occur during both ads and normal content.
+The report now focuses on InnerTube protobuf discovery: aggregate ad-marker counts and the nearest plausible protobuf field plus distance statistics for those markers. The old path-level ad/playback classifier was removed after real-device temporal testing showed that the same endpoint families occur during both ads and normal content.
 
 The protobuf mutation mechanism is present but inert by default. It requires both `PROTOBUF_BLOCKING_ENABLED=true` and an explicit, validated `PROTOBUF_BLOCK_FIELD_TAGS` list; the repository ships with blocking disabled and an empty field list.
 
