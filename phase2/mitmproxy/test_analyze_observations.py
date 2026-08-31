@@ -11,20 +11,40 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ObservationAnalysisTest(unittest.TestCase):
-    def test_candidate_categories_are_aggregated_without_paths_or_hosts(self):
+    def test_protobuf_discovery_is_aggregated_without_hosts_or_paths(self):
         result = MODULE.summarize(
             [
                 '{"event":"http_request","host":"www.youtube.com","path":"/pagead/adview","http_version":"HTTP/2.0"}',
-                '{"event":"http_request","host":"rr.googlevideo.com","path":"/videoplayback","http_version":"HTTP/1.1"}',
+                '{"event":"protobuf_response_scan","host":"youtubei.googleapis.com","path":"/youtubei/v1/browse","body_bytes":1800000,"markers":{"pagead":2},"candidate_fields":{"50195462":2,"49399797":1}}',
                 '{"event":"tls_failed_client","sni":"private.example","error_category":"certificate_rejected","transport":"tcp"}',
             ]
         )
-        self.assertEqual(result["request_categories"]["ad_related_candidate"], 1)
-        self.assertEqual(result["request_categories"]["playback_related"], 1)
-        self.assertEqual(result["tls_failures"]["certificate_rejected"], 1)
+        self.assertEqual(result["protobuf"]["responses_scanned"], 1)
+        self.assertEqual(result["protobuf"]["bytes_scanned"], 1800000)
+        self.assertEqual(
+            result["protobuf"]["marker_occurrences"]["pagead"], 2
+        )
+        self.assertEqual(
+            result["protobuf"]["candidate_field_hits"]["50195462"], 2
+        )
+        self.assertEqual(
+            result["tls_failures"]["certificate_rejected"], 1
+        )
         self.assertNotIn("host", result)
         self.assertNotIn("path", result)
-        self.assertFalse(result["blocking_enabled"])
+        self.assertFalse(result["blocking_observed"])
+
+    def test_mutations_are_reported_explicitly(self):
+        result = MODULE.summarize(
+            [
+                '{"event":"protobuf_response_mutation","mutation_count":2,"mutated_fields":{"50195462":2}}'
+            ]
+        )
+        self.assertTrue(result["blocking_observed"])
+        self.assertEqual(result["protobuf"]["mutations"], 2)
+        self.assertEqual(
+            result["protobuf"]["mutated_field_hits"]["50195462"], 2
+        )
 
     def test_invalid_json_is_counted(self):
         result = MODULE.summarize(["not-json", "[]"])
