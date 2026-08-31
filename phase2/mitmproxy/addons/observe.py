@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,9 +52,22 @@ def _safe_path(raw: str) -> str:
 
     try:
         parsed = urlsplit(raw)
-        return parsed.path or "/"
     except ValueError:
         return "/"
+
+    path = parsed.path or "/"
+    safe_segments = []
+    for segment in path.split("/"):
+        token_like = (
+            len(segment) > 48
+            or "=" in segment
+            or (segment.count(".") >= 2 and len(segment) > 20)
+            or bool(re.fullmatch(r"[A-Za-z0-9_-]{32,}", segment))
+        )
+        safe_segments.append("<redacted>" if token_like else segment)
+
+    sanitized = "/".join(safe_segments)
+    return sanitized[:512] or "/"
 
 
 def _decode_alpn(value: object) -> str | None:
@@ -188,6 +202,7 @@ def tls_failed_server(data: tls.TlsData) -> None:
 if __name__ == "__main__":
     assert _safe_path("/watch?v=secret&token=hidden") == "/watch"
     assert _safe_path("https://example.test/a/b?q=private") == "/a/b"
+    assert _safe_path("/api/abcdefghijklmnopqrstuvwxyz0123456789ABCDEF") == "/api/<redacted>"
     assert _matches_host("youtubei.googleapis.com")
     assert not _matches_host("example.test")
     assert _decode_alpn(b"h2") == "h2"
