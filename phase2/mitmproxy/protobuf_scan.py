@@ -111,7 +111,10 @@ class ProtobufStreamScanner:
         self._tail = b""
         self._bytes_seen = 0
         self._marker_counts: Counter[str] = Counter()
-        self._candidate_fields: Counter[int] = Counter()
+        self._nearest_field_hits: Counter[int] = Counter()
+        self._nearest_field_distance_sum: Counter[int] = Counter()
+        self._nearest_field_min_distance: dict[int, int] = {}
+        self._nearest_field_max_distance: dict[int, int] = {}
 
     def feed(self, chunk: bytes) -> None:
         if not chunk:
@@ -130,13 +133,28 @@ class ProtobufStreamScanner:
                 absolute_end = absolute_base + marker_pos + len(marker)
                 if absolute_end > previous_total:
                     self._marker_counts[marker_name] += 1
-                    for field_number, _distance in enclosing_length_delimited_fields(
+                    candidates = enclosing_length_delimited_fields(
                         combined,
                         marker_pos,
                         len(marker),
                         self.backtrack_bytes,
-                    )[:12]:
-                        self._candidate_fields[field_number] += 1
+                    )
+                    if candidates:
+                        field_number, distance = candidates[0]
+                        self._nearest_field_hits[field_number] += 1
+                        self._nearest_field_distance_sum[field_number] += distance
+                        self._nearest_field_min_distance[field_number] = min(
+                            distance,
+                            self._nearest_field_min_distance.get(
+                                field_number, distance
+                            ),
+                        )
+                        self._nearest_field_max_distance[field_number] = max(
+                            distance,
+                            self._nearest_field_max_distance.get(
+                                field_number, distance
+                            ),
+                        )
                 search_from = marker_pos + 1
 
         self._bytes_seen += len(chunk)
@@ -144,13 +162,27 @@ class ProtobufStreamScanner:
 
     def result(self, max_fields: int = 16) -> dict[str, object]:
         fields = sorted(
-            self._candidate_fields.items(),
-            key=lambda item: (-item[1], item[0]),
+            self._nearest_field_hits.items(),
+            key=lambda item: (
+                -item[1],
+                self._nearest_field_min_distance[item[0]],
+                item[0],
+            ),
         )[:max_fields]
+        nearest_fields = {}
+        for field, hits in fields:
+            nearest_fields[str(field)] = {
+                "hits": hits,
+                "min_distance": self._nearest_field_min_distance[field],
+                "max_distance": self._nearest_field_max_distance[field],
+                "avg_distance": round(
+                    self._nearest_field_distance_sum[field] / hits, 2
+                ),
+            }
         return {
             "body_bytes": self._bytes_seen,
             "markers": dict(sorted(self._marker_counts.items())),
-            "candidate_fields": {str(field): count for field, count in fields},
+            "nearest_fields": nearest_fields,
         }
 
 
@@ -226,7 +258,7 @@ if __name__ == "__main__":
     scanner.feed(field[12:])
     result = scanner.result()
     assert result["markers"]["pagead"] == 1
-    assert str(target) in result["candidate_fields"]
+    assert result["nearest_fields"][str(target)]["hits"] == 1
     mutated, changes = denature_ad_fields(field, [target])
     assert changes == {target: 1}
     assert mutated != field and len(mutated) == len(field)
