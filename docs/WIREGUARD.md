@@ -212,8 +212,3 @@ docker compose exec -T wireguard wg show wg0
 
 The WireGuard healthcheck validates the persistent client configuration, `wg0`, the UDP listen port and the local DNS forwarder process.
 
-## Legacy IKEv2 material
-
-`vpn/strongswan/` is retained as historical IKEv2 material only.
-
-It is not wired into the active Compose stack and is not deleted by the WireGuard implementation.

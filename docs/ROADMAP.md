@@ -1,53 +1,67 @@
 # Roadmap
 
-## M0 - Bootstrap
+## M0 - DNS blocker foundation
 
 - [x] Repository structure
 - [x] Domain rule engine
-- [x] Debug collector
 - [x] Docker deployment
+- [x] Persistent SQLite statistics
+- [x] Telegram administration
+- [x] Automatic updater with rollback
 
-## M1 - App-less DoH
+## M1 - Public DoH
 
-- [x] DNS message parser
 - [x] DoH GET/POST endpoint
 - [x] Domain filtering
-- [x] Empty-answer blocked response
-- [x] Upstream UDP forwarding
-- [x] iOS managed DoH profile template
-- [x] Profile generator
-- [x] Cloudflare-compatible HTTP deployment
+- [x] Upstream DNS forwarding
+- [x] Dynamic iOS managed DoH profile at `/install`
+- [x] Cloudflare-compatible public deployment
+- [x] Public/admin endpoint isolation
 
-## M2 - Production hardening
+## M2 - Rule feeds and diagnostics
 
-- [ ] Correct DoH POST raw-body handling
-- [ ] Full DNS name compression support
-- [ ] TCP fallback for truncated upstream responses
-- [ ] IPv6 upstream support
-- [ ] Persistent query/debug logging
-- [ ] Rate limiting
-- [x] Rule hot reload
-- [x] Resolver/query metrics via SQLite
-
-## M3 - Rule feeds
-
-- [x] Import EasyList/AdGuard/OISD-compatible domain feeds
+- [x] External domain-feed import
 - [x] Normalize and deduplicate
 - [x] Scheduled updates
 - [x] Rule provenance, multi-list attribution and overlap diagnostics
+- [x] Rule hot reload
+- [x] Resolver/query metrics via SQLite
 - [ ] Per-client allow/block overrides
 
-## M4 - iOS distribution
+## M3 - Resolver hardening
 
-- [ ] Generate final signed/unsigned mobileconfig
-- [ ] Serve profile from /install
-- [ ] Validate iOS install flow
-- [ ] Validate Wi-Fi and cellular behavior
+- [ ] Full DNS name-compression coverage
+- [ ] TCP fallback for truncated upstream responses
+- [ ] IPv6 upstream support
+- [ ] Rate limiting
 
-## M5 - YouTube experimental
+## M4 - WireGuard full tunnel
 
-- [x] Persistent labeled AD/VIDEO DNS capture tooling
-- [ ] Measure what DNS-only filtering can block
-- [ ] Compare ad and non-ad playback DNS activity
-- [ ] Identify safe dedicated ad endpoints if any
-- [ ] Document limits of DNS-only blocking
+- [x] Dockerized WireGuard gateway
+- [x] Persistent server/client keys
+- [x] Full IPv4/IPv6 route capture
+- [x] NAT/Internet forwarding
+- [x] VPN DNS through the existing blocker
+- [x] iPhone QR/config export
+- [x] Healthcheck and updater integration
+- [x] Real iPhone handshake and full-tunnel validation
+
+## M5 - HTTPS observation lab
+
+- [ ] Transparent HTTPS proxy container
+- [ ] Persistent private CA outside Git
+- [ ] Observation-only metadata logging
+- [ ] Reversible HTTPS interception toggle
+- [ ] Reversible QUIC/UDP 443 toggle
+- [ ] TLS/pinning/QUIC go/no-go diagnostics
+- [ ] Keep interception disabled by default
+
+## M6 - YouTube experimental
+
+- [x] DNS-only limitation documented
+- [x] Legacy labeled DNS capture backend retained for diagnostics
+- [ ] Test official YouTube iOS TLS interception
+- [ ] Determine whether certificate pinning prevents inspection
+- [ ] Compare ad and normal-video request metadata
+- [ ] Identify request-level signals only if interception is viable
+- [ ] Add blocking rules only after false-positive validation
