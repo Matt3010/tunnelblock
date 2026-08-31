@@ -68,8 +68,11 @@ services:
       WG_DNS_SERVERS: 10.66.66.1
       WG_DNS_UPSTREAMS: doh-a,doh-b
       WG_MTU: 1420
+      WG_CA_HTTP_ADDRESS: 10.66.66.1
+      WG_CA_HTTP_PORT: 8081
     volumes:
       - ${HOST_REPO_DIR:-.}/data/wireguard:/config
+      - ${HOST_REPO_DIR:-.}/data/mitmproxy-public:/ca-public:ro
       - /lib/modules:/lib/modules:ro
     ports:
       - "51820:51820/udp"

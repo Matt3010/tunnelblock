@@ -5,6 +5,9 @@ ACTION="${1:-status}"
 CA_DIR="${HOST_REPO_DIR:-.}/data/mitmproxy"
 PEM="$CA_DIR/mitmproxy-ca-cert.pem"
 DER="$CA_DIR/mitmproxy-ca-cert.cer"
+PUBLIC_DIR="${HOST_REPO_DIR:-.}/data/mitmproxy-public"
+PUBLIC_DER="$PUBLIC_DIR/mitmproxy-ca-cert.cer"
+VPN_CA_URL="http://10.66.66.1:8081/mitmproxy-ca-cert.cer"
 
 observer_state() {
   CID="$(docker compose --profile https-lab ps -q mitmproxy 2>/dev/null || true)"
@@ -70,7 +73,13 @@ src = Path("/home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem")
 dst = Path("/home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.cer")
 dst.write_bytes(x509.load_pem_x509_certificate(src.read_bytes()).public_bytes(Encoding.DER))
 '
+    mkdir -p "$PUBLIC_DIR"
+    TMP_PUBLIC="$PUBLIC_DER.tmp.$$"
+    cp "$DER" "$TMP_PUBLIC"
+    chmod 0644 "$TMP_PUBLIC"
+    mv -f "$TMP_PUBLIC" "$PUBLIC_DER"
     echo "iOS-installable public CA exported to: $DER"
+    echo "With WireGuard connected, download it from: $VPN_CA_URL"
     ;;
   fingerprint)
     require_public_ca

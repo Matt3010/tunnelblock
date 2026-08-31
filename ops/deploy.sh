@@ -121,6 +121,13 @@ deploy_target() (
   set -eu
 
   log "== Deploy $TARGET_SHA =="
+  mkdir -p data/mitmproxy-public
+  chmod 0755 data/mitmproxy-public
+  if [ -s data/mitmproxy/mitmproxy-ca-cert.cer ]; then
+    cp data/mitmproxy/mitmproxy-ca-cert.cer data/mitmproxy-public/mitmproxy-ca-cert.cer.tmp
+    chmod 0644 data/mitmproxy-public/mitmproxy-ca-cert.cer.tmp
+    mv -f data/mitmproxy-public/mitmproxy-ca-cert.cer.tmp data/mitmproxy-public/mitmproxy-ca-cert.cer
+  fi
   log "== Ensure Phase-2 lab is off before pre-flight =="
   ensure_phase2_off
 

@@ -160,6 +160,15 @@ Result:
 data/mitmproxy/mitmproxy-ca-cert.cer
 ```
 
+`export-ios` also publishes an isolated copy containing no private material. With WireGuard
+connected, open this URL on the iPhone:
+
+```text
+http://10.66.66.1:8081/mitmproxy-ca-cert.cer
+```
+
+The endpoint listens only on the WireGuard address; Docker exposes no host port for it.
+
 Optional SHA-256 fingerprint:
 
 ```bash
