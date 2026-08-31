@@ -53,17 +53,16 @@ def tag_bytes(field_number: int, wire_type: int = 2) -> bytes:
     return encode_varint((field_number << 3) | wire_type)
 
 
-def enclosing_length_delimited_fields(
+def enclosing_length_delimited_candidates(
     data: bytes | bytearray | memoryview,
     marker_start: int,
     marker_length: int,
     backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
-) -> list[tuple[int, int]]:
-    """Return plausible length-delimited fields enclosing a marker.
+) -> list[tuple[int, int, int]]:
+    """Return plausible enclosing protobuf fields as (field, distance, tag_pos).
 
-    This is schema-free discovery. Each tuple is (field_number, distance) and
-    results are nearest-first. Random bytes can look like protobuf tags, so callers
-    must treat these as candidates and validate repeated observations.
+    A candidate is accepted only when its decoded length-delimited payload
+    actually contains the complete marker. Results are nearest-first.
     """
 
     if marker_start < 0 or marker_length <= 0:
@@ -71,7 +70,7 @@ def enclosing_length_delimited_fields(
 
     marker_end = marker_start + marker_length
     start = max(0, marker_start - max(0, backtrack_bytes))
-    nearest: dict[int, int] = {}
+    candidates: list[tuple[int, int, int]] = []
 
     for pos in range(start, marker_start):
         key_decoded = decode_varint(data, pos, max_bytes=5)
@@ -91,10 +90,28 @@ def enclosing_length_delimited_fields(
         if payload_start <= marker_start and marker_end <= payload_end:
             distance = marker_start - pos
             if distance <= backtrack_bytes:
-                previous = nearest.get(field_number)
-                if previous is None or distance < previous:
-                    nearest[field_number] = distance
+                candidates.append((field_number, distance, pos))
 
+    return sorted(candidates, key=lambda item: (item[1], item[0], item[2]))
+
+
+def enclosing_length_delimited_fields(
+    data: bytes | bytearray | memoryview,
+    marker_start: int,
+    marker_length: int,
+    backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
+) -> list[tuple[int, int]]:
+    """Return nearest occurrence of each plausible enclosing field."""
+
+    nearest: dict[int, int] = {}
+    for field_number, distance, _pos in enclosing_length_delimited_candidates(
+        data,
+        marker_start,
+        marker_length,
+        backtrack_bytes,
+    ):
+        if field_number not in nearest:
+            nearest[field_number] = distance
     return sorted(nearest.items(), key=lambda item: (item[1], item[0]))
 
 
@@ -111,7 +128,22 @@ class ProtobufStreamScanner:
         self._tail = b""
         self._bytes_seen = 0
         self._marker_counts: Counter[str] = Counter()
+        self._marker_without_candidate: Counter[str] = Counter()
         self._candidate_fields: Counter[int] = Counter()
+        self._nearest_fields: Counter[int] = Counter()
+        self._nearest_distance_total: Counter[int] = Counter()
+        self._nearest_distance_min: dict[int, int] = {}
+        self._nearest_distance_max: dict[int, int] = {}
+
+    def _record_nearest(self, field_number: int, distance: int) -> None:
+        self._nearest_fields[field_number] += 1
+        self._nearest_distance_total[field_number] += distance
+        previous_min = self._nearest_distance_min.get(field_number)
+        previous_max = self._nearest_distance_max.get(field_number)
+        if previous_min is None or distance < previous_min:
+            self._nearest_distance_min[field_number] = distance
+        if previous_max is None or distance > previous_max:
+            self._nearest_distance_max[field_number] = distance
 
     def feed(self, chunk: bytes) -> None:
         if not chunk:
@@ -130,13 +162,18 @@ class ProtobufStreamScanner:
                 absolute_end = absolute_base + marker_pos + len(marker)
                 if absolute_end > previous_total:
                     self._marker_counts[marker_name] += 1
-                    for field_number, _distance in enclosing_length_delimited_fields(
+                    fields = enclosing_length_delimited_fields(
                         combined,
                         marker_pos,
                         len(marker),
                         self.backtrack_bytes,
-                    )[:12]:
+                    )
+                    for field_number, _distance in fields[:12]:
                         self._candidate_fields[field_number] += 1
+                    if fields:
+                        self._record_nearest(*fields[0])
+                    else:
+                        self._marker_without_candidate[marker_name] += 1
                 search_from = marker_pos + 1
 
         self._bytes_seen += len(chunk)
@@ -147,10 +184,31 @@ class ProtobufStreamScanner:
             self._candidate_fields.items(),
             key=lambda item: (-item[1], item[0]),
         )[:max_fields]
+        nearest = sorted(
+            self._nearest_fields.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:max_fields]
+        distance_stats: dict[str, dict[str, int | float]] = {}
+        for field, hits in nearest:
+            total = self._nearest_distance_total[field]
+            distance_stats[str(field)] = {
+                "hits": hits,
+                "min": self._nearest_distance_min[field],
+                "max": self._nearest_distance_max[field],
+                "avg": round(total / hits, 2),
+            }
+
         return {
             "body_bytes": self._bytes_seen,
             "markers": dict(sorted(self._marker_counts.items())),
+            "markers_without_candidate": dict(
+                sorted(self._marker_without_candidate.items())
+            ),
             "candidate_fields": {str(field): count for field, count in fields},
+            "nearest_candidate_fields": {
+                str(field): count for field, count in nearest
+            },
+            "nearest_candidate_distance_bytes": distance_stats,
         }
 
 
@@ -159,11 +217,11 @@ def denature_ad_fields(
     target_fields: tuple[int, ...] | list[int],
     backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
 ) -> tuple[bytes, dict[int, int]]:
-    """Denature validated protobuf fields located immediately before ad markers.
+    """Denature validated protobuf fields that genuinely enclose ad markers.
 
     The replacement changes field_number to field_number - 1 while keeping wire
     type 2 and payload bytes untouched. Only explicitly configured target fields
-    are eligible. This function is inert for an empty target list.
+    are eligible, and the decoded field length must contain the marker.
     """
 
     targets = tuple(
@@ -193,25 +251,24 @@ def denature_ad_fields(
             marker_pos = body.find(marker, search_from)
             if marker_pos < 0:
                 break
-            start = max(0, marker_pos - max(0, backtrack_bytes))
-            nearest: tuple[int, int, bytes, bytes] | None = None
-            for field, (old, new) in target_tags.items():
-                pos = body.rfind(old, start, marker_pos)
-                if pos < 0:
-                    continue
-                candidate = (pos, field, old, new)
-                if nearest is None or pos > nearest[0]:
-                    nearest = candidate
 
-            if nearest is not None:
-                pos, field, old, new = nearest
-                if (
-                    pos not in mutated_positions
-                    and body[pos : pos + len(old)] == old
-                ):
-                    body[pos : pos + len(old)] = new
-                    mutated_positions.add(pos)
-                    mutations[field] += 1
+            for field, _distance, pos in enclosing_length_delimited_candidates(
+                body,
+                marker_pos,
+                len(marker),
+                backtrack_bytes,
+            ):
+                tags = target_tags.get(field)
+                if tags is None or pos in mutated_positions:
+                    continue
+                old, new = tags
+                if body[pos : pos + len(old)] != old:
+                    continue
+                body[pos : pos + len(old)] = new
+                mutated_positions.add(pos)
+                mutations[field] += 1
+                break
+
             search_from = marker_pos + 1
 
     return bytes(body), dict(sorted(mutations.items()))
@@ -226,7 +283,7 @@ if __name__ == "__main__":
     scanner.feed(field[12:])
     result = scanner.result()
     assert result["markers"]["pagead"] == 1
-    assert str(target) in result["candidate_fields"]
+    assert result["nearest_candidate_fields"][str(target)] == 1
     mutated, changes = denature_ad_fields(field, [target])
     assert changes == {target: 1}
     assert mutated != field and len(mutated) == len(field)
