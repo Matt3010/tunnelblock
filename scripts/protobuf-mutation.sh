@@ -53,24 +53,24 @@ enable_mutation() {
     PROTOBUF_BLOCK_FIELD_TAGS="$FIELD" \
     sh scripts/https-intercept.sh enable; then
     cleanup
-    echo "Failed to start structural protobuf mutation mode." >&2
+    echo "Failed to start protobuf payload neutralization mode." >&2
     exit 1
   fi
 
   if ! sh scripts/quic.sh block; then
     cleanup
-    echo "Failed to block QUIC; mutation mode was disabled." >&2
+    echo "Failed to block QUIC; neutralization mode was disabled." >&2
     exit 1
   fi
 
   SETTING="$(runtime_setting)"
   if [ "$SETTING" != "running|true|$FIELD" ]; then
     cleanup
-    echo "Runtime mutation settings did not match the requested field." >&2
+    echo "Runtime neutralization settings did not match the requested field." >&2
     exit 1
   fi
 
-  echo "Protobuf structural mutation: enabled"
+  echo "Protobuf payload neutralization: enabled"
   echo "Target field: $FIELD"
   echo "Required markers: pagead + googleadservices"
   echo "HTTPS interception: enabled"
@@ -83,7 +83,7 @@ case "$ACTION" in
     ;;
   disable)
     cleanup
-    echo "Protobuf structural mutation: disabled"
+    echo "Protobuf payload neutralization: disabled"
     echo "HTTPS interception: disabled"
     echo "QUIC UDP/443: allowed"
     ;;
@@ -95,9 +95,9 @@ case "$ACTION" in
     FIELDS="${REST#*|}"
 
     if [ "$STATE" = "running" ] && [ "$BLOCKING" = "true" ] && [ -n "$FIELDS" ]; then
-      echo "Protobuf structural mutation: enabled (field $FIELDS)"
+      echo "Protobuf payload neutralization: enabled (field $FIELDS)"
     else
-      echo "Protobuf structural mutation: disabled"
+      echo "Protobuf payload neutralization: disabled"
     fi
     ;;
   *)

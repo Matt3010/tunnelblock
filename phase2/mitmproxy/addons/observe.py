@@ -12,7 +12,7 @@ from mitmproxy import tls
 from protobuf_scan import (
     DEFAULT_BACKTRACK_BYTES,
     ProtobufStreamScanner,
-    denature_planned_nodes,
+    neutralize_planned_nodes,
     planned_field_counts,
 )
 
@@ -262,8 +262,9 @@ def responseheaders(flow: http.HTTPFlow) -> None:
     if PROTOBUF_BLOCKING_ENABLED and PROTOBUF_BLOCK_FIELD_TAGS:
         # Mutation is deliberately opt-in. Only this mode buffers matching
         # InnerTube protobuf responses; discovery mode stays fully streamed.
-        # Configured field numbers are mutated only when the same physical
-        # protobuf node contains every configured ad marker type.
+        # Configured field payloads are neutralized only when the same physical
+        # protobuf node contains every configured ad marker type. Neutralization
+        # preserves response length, so enclosing protobuf lengths stay valid.
         flow.metadata["phase2_protobuf_buffered"] = True
         response.stream = False
         return
@@ -303,38 +304,42 @@ def response(flow: http.HTTPFlow) -> None:
         )
     ]
     planned_fields = planned_field_counts(planned_nodes)
-    mutated, mutations = denature_planned_nodes(body, planned_nodes)
+    neutralized, neutralizations = neutralize_planned_nodes(
+        body,
+        planned_nodes,
+    )
 
-    if mutations != planned_fields:
+    if neutralizations != planned_fields:
         _emit(
-            "protobuf_response_mutation_rejected",
+            "protobuf_response_neutralization_rejected",
             host=request.pretty_host,
             path=path,
-            reason="planned_mutated_mismatch",
+            reason="planned_neutralized_mismatch",
             planned_fields={
                 str(field): count
                 for field, count in planned_fields.items()
             },
-            mutated_fields={
+            neutralized_fields={
                 str(field): count
-                for field, count in mutations.items()
+                for field, count in neutralizations.items()
             },
         )
         return
 
-    if mutations:
-        response.set_content(mutated)
+    if neutralizations:
+        response.set_content(neutralized)
         _emit(
-            "protobuf_response_mutation",
+            "protobuf_response_neutralization",
             host=request.pretty_host,
             path=path,
-            mutation_count=sum(mutations.values()),
+            neutralization_count=sum(neutralizations.values()),
             planned_fields={
                 str(field): count
                 for field, count in planned_fields.items()
             },
-            mutated_fields={
-                str(field): count for field, count in mutations.items()
+            neutralized_fields={
+                str(field): count
+                for field, count in neutralizations.items()
             },
         )
 

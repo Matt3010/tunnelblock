@@ -79,7 +79,7 @@ The addon does **not** persist:
 
 Request bodies and ordinary response bodies are streamed through rather than buffered by the addon. For `youtubei.googleapis.com/youtubei/v1/*`, the request is constrained to identity encoding and protobuf response bytes are scanned in-flight with a bounded tail buffer. The scanner looks for ad-related byte markers and plausible enclosing length-delimited field numbers, then forwards the original bytes unchanged. It never writes response payloads to disk.
 
-Active protobuf mutation is a separate opt-in path. It buffers only eligible InnerTube protobuf responses and denatures an explicitly configured, previously validated field number only when the same physical length-delimited node contains every configured ad marker type. The exact shared-node plan is produced by the same scanner instance used for the diagnostic record; mutation does not perform a second broader candidate scan. Planned and mutated field counts must match exactly or the original response is forwarded unchanged and a `protobuf_response_mutation_rejected` event is logged. Compose defaults remain `PROTOBUF_BLOCKING_ENABLED=false` with an empty field list; runtime overrides are accepted only for an explicit test session through `scripts/protobuf-mutation.sh`.
+Active protobuf blocking is a separate opt-in path. It buffers only eligible InnerTube protobuf responses and neutralizes the payload of an explicitly configured, previously validated shared physical node. The exact node plan is produced by the same scanner instance used for the diagnostic record; no broader rescan occurs. Neutralization preserves the response byte length and all enclosing protobuf length prefixes by replacing only the selected payload bytes with valid zero-length high-number unknown fields. Planned and neutralized counts must match exactly or the original response is forwarded unchanged and a `protobuf_response_neutralization_rejected` event is logged. Compose defaults remain `PROTOBUF_BLOCKING_ENABLED=false` with an empty field list; runtime overrides are accepted only for an explicit test session through `scripts/protobuf-mutation.sh`.
 
 Normal mitmdump flow output is disabled so Docker logs do not become a second, less-redacted traffic log. TLS failures are persisted only as coarse categories, never as raw library error strings.
 
@@ -285,7 +285,7 @@ sh scripts/quic.sh block
 sh scripts/quic.sh allow
 sh scripts/quic.sh status
 
-# one-shot structural protobuf mutation
+# one-shot protobuf payload neutralization
 sh scripts/protobuf-mutation.sh enable 14
 sh scripts/protobuf-mutation.sh status
 sh scripts/protobuf-mutation.sh disable

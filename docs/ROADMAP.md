@@ -75,6 +75,8 @@
 - [x] Restrict mutation to shared physical nodes containing all ad markers
 - [x] Add runtime-only one-shot mutation controller with safe defaults
 - [x] Unify diagnostic and mutation node selection with planned==mutated fail-closed guard
+- [x] Reject field-tag denaturing as ineffective on live iOS test
+- [x] Add length-preserving shared-node payload neutralization
 - [x] Add protobuf field-denaturing mechanism behind disabled interlocks
 - [ ] Validate stable current-iOS candidate field numbers across repeated ad/no-ad captures
 - [ ] Run false-positive playback validation with an explicitly configured field list

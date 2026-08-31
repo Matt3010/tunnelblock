@@ -271,6 +271,86 @@ class ProtobufScanTest(unittest.TestCase):
         self.assertEqual(changes, {})
         self.assertEqual(mutated, body)
 
+    def test_neutralize_planned_nodes_preserves_length_and_removes_markers(self):
+        page_leaf = self._field(14, b"x/pagead/y")
+        google_leaf = self._field(
+            7,
+            b"xgoogleadservices.comy",
+        )
+        shared_payload = page_leaf + google_leaf + (b"z" * 32)
+        shared_parent = self._field(14, shared_payload)
+        unrelated = self._field(14, b"only/pagead/here")
+        body = unrelated + self._field(214, shared_parent)
+
+        scanner = MODULE.ProtobufStreamScanner(backtrack_bytes=1024)
+        scanner.feed(body)
+        planned_nodes = [
+            candidate
+            for candidate, _marker_hits, _depths
+            in scanner.shared_nodes([14])
+        ]
+        planned = MODULE.planned_field_counts(planned_nodes)
+
+        neutralized, changes = MODULE.neutralize_planned_nodes(
+            body,
+            planned_nodes,
+        )
+
+        self.assertEqual(planned, {14: 1})
+        self.assertEqual(changes, planned)
+        self.assertEqual(len(neutralized), len(body))
+        self.assertEqual(
+            neutralized[: len(unrelated)],
+            unrelated,
+        )
+
+        target = planned_nodes[0]
+        payload = neutralized[target[3]:target[4]]
+        self.assertNotIn(b"/pagead/", payload)
+        self.assertNotIn(b"googleadservices.com", payload)
+
+    def test_neutral_filler_is_valid_zero_length_protobuf_fields(self):
+        filler = MODULE._neutral_filler(257)
+        self.assertEqual(len(filler), 257)
+
+        pos = 0
+        while pos < len(filler):
+            key_decoded = MODULE.decode_varint(filler, pos, max_bytes=5)
+            self.assertIsNotNone(key_decoded)
+            key, key_end = key_decoded
+            self.assertEqual(key & 0x07, 2)
+            self.assertGreaterEqual(key >> 3, 2047)
+
+            length_decoded = MODULE.decode_varint(
+                filler,
+                key_end,
+                max_bytes=10,
+            )
+            self.assertIsNotNone(length_decoded)
+            length, payload_start = length_decoded
+            self.assertEqual(length, 0)
+            self.assertEqual(payload_start, key_end + 1)
+            pos = payload_start
+
+        self.assertEqual(pos, len(filler))
+
+    def test_neutralization_exposes_plan_mismatch(self):
+        body = self._field(
+            14,
+            b"x/pagead/xgoogleadservices.comy",
+        )
+        bad_node = (14, 0, len(body) + 10, 0, len(body))
+
+        planned = MODULE.planned_field_counts([bad_node])
+        neutralized, changes = MODULE.neutralize_planned_nodes(
+            body,
+            [bad_node],
+        )
+
+        self.assertEqual(planned, {14: 1})
+        self.assertEqual(changes, {})
+        self.assertEqual(neutralized, body)
+
     def test_shared_structural_denature_requires_both_marker_types(self):
         body = self._field(14, b"only/pagead/here")
 
