@@ -108,10 +108,23 @@ verify_stack() {
   return 1
 }
 
+ensure_phase2_off() {
+  CID="$(docker compose ps -q wireguard 2>/dev/null || true)"
+  if [ -n "$CID" ]; then
+    docker compose exec -T wireguard sh -c \
+      'if [ -x /app/phase2-firewall.sh ]; then /app/phase2-firewall.sh https disable; /app/phase2-firewall.sh quic allow; fi' \
+      >>"$LOG_FILE" 2>&1 || true
+  fi
+  docker compose --profile https-lab rm -f -s mitmproxy >>"$LOG_FILE" 2>&1 || true
+}
+
 deploy_target() (
   set -eu
 
   log "== Deploy $TARGET_SHA =="
+  log "== Ensure Phase-2 lab is off before pre-flight =="
+  ensure_phase2_off
+
   log "== Pre-flight: docker compose config =="
   docker compose config --quiet >>"$LOG_FILE" 2>&1
   docker compose --profile https-lab config --quiet >>"$LOG_FILE" 2>&1
@@ -132,11 +145,6 @@ deploy_target() (
   docker compose run --rm --no-deps --entrypoint npm updater run typecheck >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight passed =="
-  log "== Ensure Phase-2 lab is off =="
-  docker compose exec -T wireguard /app/phase2-firewall.sh https disable >>"$LOG_FILE" 2>&1 || true
-  docker compose exec -T wireguard /app/phase2-firewall.sh quic allow >>"$LOG_FILE" 2>&1 || true
-  docker compose --profile https-lab rm -f -s mitmproxy >>"$LOG_FILE" 2>&1 || true
-
   log "== Recreate complete stack =="
   docker compose up -d --force-recreate --remove-orphans >>"$LOG_FILE" 2>&1
 
