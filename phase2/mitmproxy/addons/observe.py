@@ -12,7 +12,8 @@ from mitmproxy import tls
 from protobuf_scan import (
     DEFAULT_BACKTRACK_BYTES,
     ProtobufStreamScanner,
-    denature_shared_ad_fields,
+    denature_planned_nodes,
+    planned_field_counts,
 )
 
 LOG_PATH = Path(
@@ -295,11 +296,32 @@ def response(flow: http.HTTPFlow) -> None:
     scanner.feed(body)
     _emit_protobuf_scan(request.pretty_host, path, scanner)
 
-    mutated, mutations = denature_shared_ad_fields(
-        body,
-        PROTOBUF_BLOCK_FIELD_TAGS,
-        backtrack_bytes=PROTOBUF_BACKTRACK_BYTES,
-    )
+    planned_nodes = [
+        candidate
+        for candidate, _marker_hits, _depths in scanner.shared_nodes(
+            PROTOBUF_BLOCK_FIELD_TAGS
+        )
+    ]
+    planned_fields = planned_field_counts(planned_nodes)
+    mutated, mutations = denature_planned_nodes(body, planned_nodes)
+
+    if mutations != planned_fields:
+        _emit(
+            "protobuf_response_mutation_rejected",
+            host=request.pretty_host,
+            path=path,
+            reason="planned_mutated_mismatch",
+            planned_fields={
+                str(field): count
+                for field, count in planned_fields.items()
+            },
+            mutated_fields={
+                str(field): count
+                for field, count in mutations.items()
+            },
+        )
+        return
+
     if mutations:
         response.set_content(mutated)
         _emit(
@@ -307,6 +329,10 @@ def response(flow: http.HTTPFlow) -> None:
             host=request.pretty_host,
             path=path,
             mutation_count=sum(mutations.values()),
+            planned_fields={
+                str(field): count
+                for field, count in planned_fields.items()
+            },
             mutated_fields={
                 str(field): count for field, count in mutations.items()
             },
