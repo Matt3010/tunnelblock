@@ -102,10 +102,12 @@ services:
       start_period: 10s
 
   mitmproxy:
+    profiles:
+      - https-lab
     build:
       context: .
       dockerfile: phase2/mitmproxy/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       wireguard:
         condition: service_healthy
