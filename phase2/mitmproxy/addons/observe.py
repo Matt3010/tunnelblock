@@ -10,7 +10,13 @@ from mitmproxy import http
 from mitmproxy import tls
 
 from protobuf_scan import DEFAULT_BACKTRACK_BYTES, ProtobufStreamScanner
-from ump_diagnostics import ByteCounter, inspect_onesie_config
+from ump_diagnostics import (
+    ByteCounter,
+    _first_nested_bytes,
+    extract_onesie_keys,
+    inspect_onesie_config,
+)
+from ump_filter import UmpStreamFilter, filter_player_response
 
 LOG_PATH = Path(
     os.environ.get(
@@ -32,11 +38,23 @@ PROTOBUF_BACKTRACK_BYTES = int(
     os.environ.get("PROTOBUF_BACKTRACK_BYTES", str(DEFAULT_BACKTRACK_BYTES))
 )
 _lock = threading.Lock()
+LOGGING_ENABLED = (
+    os.environ.get("OBSERVATION_LOG_ENABLED", "true").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 UMP_DIAGNOSTICS_ENABLED = (
     os.environ.get("UMP_DIAGNOSTICS_ENABLED", "false")
     .strip().lower() in {"1", "true", "yes", "on"}
 )
+UMP_FILTER_ENABLED = (
+    os.environ.get("YOUTUBE_UMP_FILTER_ENABLED", "false").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 OBSERVATION_SESSION = os.environ.get("OBSERVATION_SESSION", "").strip()
+_client_key: bytes | None = None
+_encrypted_key: bytes | None = None
+_filter_spent = False
+_filter_reserved = False
 
 
 def _now() -> str:
@@ -125,6 +143,8 @@ def _rotate_if_needed() -> None:
 
 
 def _emit(event: str, **fields: object) -> None:
+    if not LOGGING_ENABLED:
+        return
     record = {
         "ts": _now(),
         "event": event,
@@ -176,6 +196,23 @@ def _is_initplayback(host: str | None, path: str) -> bool:
     return normalized.endswith(".googlevideo.com") and path == "/initplayback"
 
 
+def _reserve_filter() -> bool:
+    global _filter_reserved
+    with _lock:
+        if _filter_spent or _filter_reserved:
+            return False
+        _filter_reserved = True
+        return True
+
+
+def _finish_filter(success: bool) -> None:
+    global _filter_reserved, _filter_spent
+    with _lock:
+        _filter_reserved = False
+        if success:
+            _filter_spent = True
+
+
 def requestheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
     request.stream = True
@@ -183,6 +220,14 @@ def requestheaders(flow: http.HTTPFlow) -> None:
         return
 
     path = _safe_path(request.path)
+    if UMP_FILTER_ENABLED and _is_initplayback(request.pretty_host, path):
+        request.stream = False
+        flow.metadata["phase2_ump_request_buffered"] = True
+    elif UMP_FILTER_ENABLED and path == "/youtubei/v1/log_event":
+        # Mirrors the upstream cache-refresh behavior without storing headers.
+        request.headers.pop("content-encoding", None)
+        if _client_key is None:
+            request.headers.pop("x-youtube-hot-hash-data", None)
     if UMP_DIAGNOSTICS_ENABLED and _is_initplayback(request.pretty_host, path):
         try:
             query_parameter_count = len(
@@ -215,6 +260,25 @@ def requestheaders(flow: http.HTTPFlow) -> None:
         http_version=request.http_version,
     )
 
+
+def request(flow: http.HTTPFlow) -> None:
+    global _client_key, _encrypted_key
+    if not flow.metadata.get("phase2_ump_request_buffered"):
+        return
+    body = flow.request.get_content(strict=False) or b""
+    try:
+        encrypted_request = _first_nested_bytes(body, 3)
+        request_key = _first_nested_bytes(encrypted_request, 5)
+    except ValueError:
+        request_key = None
+    with _lock:
+        if request_key and _encrypted_key and request_key == _encrypted_key:
+            flow.metadata["phase2_ump_filter_eligible"] = True
+        elif _encrypted_key is not None:
+            _client_key = None
+            _encrypted_key = None
+
+
 def responseheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
     response = flow.response
@@ -234,6 +298,27 @@ def responseheaders(flow: http.HTTPFlow) -> None:
         status_code=response.status_code,
         http_version=response.http_version,
     )
+
+    if (
+        UMP_FILTER_ENABLED
+        and flow.metadata.get("phase2_ump_filter_eligible")
+        and _reserve_filter()
+    ):
+        with _lock:
+            key = _client_key
+        if key is None:
+            _finish_filter(False)
+            response.stream = True
+            return
+        stream_filter = UmpStreamFilter(key)
+        flow.metadata["phase2_ump_stream_filter"] = stream_filter
+        response.headers.pop("content-length", None)
+
+        def filter_stream(chunk: bytes) -> bytes:
+            return stream_filter.feed(chunk)
+
+        response.stream = filter_stream
+        return
 
     if UMP_DIAGNOSTICS_ENABLED and _is_initplayback(request.pretty_host, path):
         counter = ByteCounter()
@@ -281,11 +366,28 @@ def responseheaders(flow: http.HTTPFlow) -> None:
         response.stream = True
         return
 
-    if UMP_DIAGNOSTICS_ENABLED and path == "/youtubei/v1/config":
+    if (
+        UMP_FILTER_ENABLED
+        and path == "/youtubei/v1/player"
+        and _reserve_filter()
+    ):
+        flow.metadata["phase2_player_filter_buffered"] = True
+        response.stream = False
+        return
+
+    if (
+        (UMP_DIAGNOSTICS_ENABLED or UMP_FILTER_ENABLED)
+        and path in {"/youtubei/v1/config", "/youtubei/v1/log_event"}
+    ):
         # Config is bounded and buffered only during an explicit diagnostic
         # session. Secret key bytes are inspected in memory and never logged.
         flow.metadata["phase2_protobuf_buffered"] = True
         response.stream = False
+        return
+
+
+    if not LOGGING_ENABLED:
+        response.stream = True
         return
 
     scanner = ProtobufStreamScanner(backtrack_bytes=PROTOBUF_BACKTRACK_BYTES)
@@ -304,7 +406,24 @@ def responseheaders(flow: http.HTTPFlow) -> None:
 
 
 def response(flow: http.HTTPFlow) -> None:
-    if not flow.metadata.get("phase2_protobuf_buffered") or flow.response is None:
+    global _client_key, _encrypted_key
+    if flow.response is None:
+        return
+
+    stream_filter = flow.metadata.pop("phase2_ump_stream_filter", None)
+    if stream_filter is not None:
+        _finish_filter(stream_filter.changes > 0)
+        return
+
+    if flow.metadata.get("phase2_player_filter_buffered"):
+        original = flow.response.get_content(strict=False) or b""
+        filtered, changes = filter_player_response(original)
+        if changes > 0:
+            flow.response.set_content(filtered)
+        _finish_filter(changes > 0)
+        return
+
+    if not flow.metadata.get("phase2_protobuf_buffered"):
         return
 
     request = flow.request
@@ -312,13 +431,25 @@ def response(flow: http.HTTPFlow) -> None:
     path = _safe_path(request.path)
     body = response.get_content(strict=False) or b""
 
-    scanner = ProtobufStreamScanner(backtrack_bytes=PROTOBUF_BACKTRACK_BYTES)
-    scanner.feed(body)
-    _emit_protobuf_scan(request.pretty_host, path, scanner)
+    if LOGGING_ENABLED:
+        scanner = ProtobufStreamScanner(
+            backtrack_bytes=PROTOBUF_BACKTRACK_BYTES
+        )
+        scanner.feed(body)
+        _emit_protobuf_scan(request.pretty_host, path, scanner)
 
-    if path == "/youtubei/v1/config":
+    if path in {"/youtubei/v1/config", "/youtubei/v1/log_event"}:
+        keys = extract_onesie_keys(body)
+        if UMP_FILTER_ENABLED and keys is not None:
+            with _lock:
+                _client_key, _encrypted_key = keys
         _emit("onesie_config", host=request.pretty_host, path=path,
               body_bytes=len(body), **inspect_onesie_config(body))
+
+
+def error(flow: http.HTTPFlow) -> None:
+    if flow.metadata.pop("phase2_ump_stream_filter", None) is not None:
+        _finish_filter(False)
 
 
 def tls_clienthello(data: tls.ClientHelloData) -> None:

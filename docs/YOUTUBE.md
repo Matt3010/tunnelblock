@@ -34,7 +34,7 @@ See `docs/HTTPS-OBSERVATION.md` for the diagnostic sequence.
 
 The real iPhone test demonstrated that HTTPS inspection is viable when QUIC is forced to fall back to TCP. A temporal ad/content comparison then showed that request paths are not a reliable blocker: `/videoplayback`, `/initplayback`, watch-time telemetry and ad-related endpoints can all appear across both windows.
 
-The experiment moved from marker correlation to the modern playback transport. It now observes the exact Onesie hot-config protobuf path and the timing/size of encrypted `googlevideo.com/initplayback` UMP responses. Response bytes, keys and query values are not persisted and traffic is forwarded unchanged.
+The implementation moved from marker correlation to the modern playback transport. The explicit one-shot filter acquires the exact Onesie hot-config keys in memory, verifies and decrypts `googlevideo.com/initplayback` UMP responses locally, removes schema-verified `adPlacements`/`adSlots`, then re-encrypts them. No keys, payloads or query values are persisted and no external Worker is used.
 
 A first real iPhone temporal capture strongly validated this direction: the ad window contained 18 `/pagead/` markers across three protobuf responses (about 200 KiB scanned), while a roughly 29-second normal-content window contained one 36-byte protobuf response and zero ad markers. This validates the marker as a useful ad-window discriminator, but not yet any specific protobuf field number.
 

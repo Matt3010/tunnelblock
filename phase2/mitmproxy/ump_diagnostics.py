@@ -92,6 +92,24 @@ def inspect_onesie_config(body: bytes) -> dict[str, object]:
         return {"parsed": False, "reason": str(error), "config_nodes": 0, "configs": []}
 
 
+def extract_onesie_keys(body: bytes) -> tuple[bytes, bytes] | None:
+    """Extract the exact hot-config keys for ephemeral in-memory use only."""
+    try:
+        for node in _descend(body, CONFIG_PATH):
+            values = {
+                number: value
+                for number, wire, value in _fields(node)
+                if wire == 2 and isinstance(value, bytes) and number in {1, 2}
+            }
+            client_key = values.get(1, b"")
+            encrypted_key = values.get(2, b"")
+            if len(client_key) == 32 and encrypted_key:
+                return client_key, encrypted_key
+    except ValueError:
+        pass
+    return None
+
+
 class ByteCounter:
     def __init__(self) -> None:
         self.body_bytes = 0
@@ -105,3 +123,11 @@ class ByteCounter:
             self.body_bytes += len(chunk)
             self.chunks += 1
         return chunk
+
+
+def _first_nested_bytes(data: bytes, number: int) -> bytes | None:
+    """Return an exact length-delimited field without retaining another copy."""
+    for field_number, wire, value in _fields(data):
+        if field_number == number and wire == 2 and isinstance(value, bytes):
+            return value
+    return None

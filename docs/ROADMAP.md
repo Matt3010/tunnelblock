@@ -82,5 +82,6 @@
 - [x] Remove obsolete field mutation and generic decision-fingerprint controls
 - [x] Add privacy-minimized Onesie config and `initplayback`/UMP timeline capture
 - [ ] Validate that current YouTube iOS uses the observed Onesie/UMP path
-- [ ] Implement local encrypted UMP decoding only after the transport is confirmed
-- [ ] Identify and validate `adPlacements`/`adSlots` decision nodes before mutation
+- [x] Implement fail-closed local UMP framing, HMAC, AES-CTR and compression handling
+- [x] Port published `adPlacements`/`adSlots` schema targets as a disabled one-shot filter
+- [ ] Validate the local one-shot filter on the real iPhone before persistent enablement

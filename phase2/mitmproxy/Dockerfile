@@ -2,8 +2,9 @@ FROM mitmproxy/mitmproxy:12.2.3@sha256:00b77b5d8804c8ad18cb6caefbf9d5849e895e898
 
 COPY phase2/mitmproxy/protobuf_scan.py /addons/protobuf_scan.py
 COPY phase2/mitmproxy/ump_diagnostics.py /addons/ump_diagnostics.py
+COPY phase2/mitmproxy/ump_filter.py /addons/ump_filter.py
 COPY phase2/mitmproxy/addons/observe.py /addons/observe.py
 
-RUN python -m py_compile /addons/protobuf_scan.py /addons/ump_diagnostics.py /addons/observe.py \
+RUN python -m py_compile /addons/protobuf_scan.py /addons/ump_diagnostics.py /addons/ump_filter.py /addons/observe.py \
     && python /addons/protobuf_scan.py \
     && python /addons/observe.py

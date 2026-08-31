@@ -37,6 +37,18 @@ class UmpDiagnosticsTest(unittest.TestCase):
         self.assertEqual(result["configs"][0]["expiry_bucket_seconds"], 900)
         self.assertNotIn("client-secret", repr(result))
 
+    def test_extracts_valid_runtime_keys_without_logging_them(self):
+        client_key = bytes(range(32))
+        encrypted_key = b"encrypted-key"
+        config = field(1, client_key) + field(2, encrypted_key)
+        body = config
+        for number in reversed(MODULE.CONFIG_PATH):
+            body = field(number, body)
+        self.assertEqual(
+            MODULE.extract_onesie_keys(body),
+            (client_key, encrypted_key),
+        )
+
     def test_does_not_promote_similar_parent(self):
         result = MODULE.inspect_onesie_config(field(146311580, field(1, b"secret")))
         self.assertEqual(result["config_nodes"], 0)

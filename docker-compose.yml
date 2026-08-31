@@ -106,7 +106,9 @@ services:
       OBSERVATION_MAX_BYTES: 26214400
       OBSERVATION_HOST_SUFFIXES: youtube.com,googlevideo.com,googleapis.com,ytimg.com,ggpht.com,doubleclick.net,googlesyndication.com,googleadservices.com
       PROTOBUF_BACKTRACK_BYTES: 8192
+      OBSERVATION_LOG_ENABLED: "${OBSERVATION_LOG_ENABLED:-true}"
       UMP_DIAGNOSTICS_ENABLED: "${UMP_DIAGNOSTICS_ENABLED:-false}"
+      YOUTUBE_UMP_FILTER_ENABLED: "${YOUTUBE_UMP_FILTER_ENABLED:-false}"
       OBSERVATION_SESSION: "${OBSERVATION_SESSION:-}"
     volumes:
       - ${HOST_REPO_DIR:-.}/data/mitmproxy:/home/mitmproxy/.mitmproxy

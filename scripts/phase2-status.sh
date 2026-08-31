@@ -5,7 +5,7 @@ docker compose --profile https-lab ps wireguard mitmproxy
 printf '\n'
 sh scripts/https-intercept.sh status
 sh scripts/quic.sh status
-sh scripts/youtube-ump-capture.sh status
+sh scripts/youtube-ump-filter.sh status
 
 CA_PATH="${HOST_REPO_DIR:-.}/data/mitmproxy/mitmproxy-ca-cert.pem"
 LOG_PATH="${HOST_REPO_DIR:-.}/data/mitmproxy/observations/metadata.jsonl"

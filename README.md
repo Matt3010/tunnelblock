@@ -85,7 +85,7 @@ It is designed to be safe by default:
 - the private CA and logs persist only under ignored `data/mitmproxy/`;
 - only metadata for YouTube-related hosts is written;
 - headers, cookies, query strings and request/response bodies are not persisted;
-- no YouTube blocking rule is installed.
+- no YouTube blocking rule is active by default.
 
 See [docs/HTTPS-OBSERVATION.md](docs/HTTPS-OBSERVATION.md) for the go/no-go test and rollback commands.
 
@@ -95,9 +95,9 @@ Captured metadata can be summarized without exposing individual hosts, paths or 
 python3 scripts/analyze-youtube-observations.py
 ```
 
-The current experiment follows the modern Onesie/UMP playback path. It records only the exact config-node shape, key lengths/presence, and relative `initplayback` request/response timing and sizes. Key bytes and encrypted payloads never enter the log. The ineffective field-14 mutation mechanism has been removed.
+The current one-shot filter follows the modern Onesie/UMP playback path entirely on the Raspberry. It keeps config keys only in RAM, verifies HMAC before decrypting, removes the schema-verified `adPlacements`/`adSlots` fields, recompresses and re-encrypts locally, and forwards the original response on any mismatch. No external Worker is used and persistent traffic logging is disabled for the filter session.
 
-Use `sh scripts/youtube-ump-capture.sh run` for a single interactive test: every `Enter` records the next visible playback phase without starting another shell or container process.
+Use `sh scripts/youtube-ump-filter.sh enable`, then open YouTube normally. Restore the safe defaults with `sh scripts/youtube-ump-filter.sh disable` after the test.
 
 ## Deployment
 

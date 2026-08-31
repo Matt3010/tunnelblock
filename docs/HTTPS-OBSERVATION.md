@@ -2,9 +2,7 @@
 
 ## Scope
 
-Phase 2 is a diagnostic lab for the official YouTube iOS app.
-
-It does not block YouTube ads. Its purpose is to answer three questions before any request-level filtering is attempted:
+Phase 2 contains the diagnostic lab and an explicit one-shot local filter for the official YouTube iOS app. The diagnostic work answered these questions:
 
 1. does the app use QUIC/HTTP/3 in a way that bypasses TCP interception?
 2. does the app accept a user-installed private CA?
@@ -23,7 +21,7 @@ The lab is deliberately fail-safe:
 - the mitmproxy service shares the WireGuard network namespace only;
 - recreating WireGuard removes temporary interception/firewall rules;
 - the private CA and observation logs live under ignored runtime data;
-- no YouTube block rule is installed.
+- the YouTube UMP filter is disabled by default and must be explicitly enabled.
 
 Runtime state:
 
@@ -91,40 +89,43 @@ Generate an aggregate report that does not reproduce individual hosts, paths or 
 python3 scripts/analyze-youtube-observations.py
 ```
 
-## Onesie/UMP playback-decision experiment
+## Local Onesie/UMP filter
 
 The marker-bearing `field 14` experiment showed correlation but not control:
 renaming its tag and then neutralizing its complete payload both left ad playback
 unchanged with exact planned/applied counts. Treat that branch as descriptive ad
 metadata, not as evidence of the player decision.
 
-The next experiment is observation-only and follows the current playback mechanism:
-the exact `/youtubei/v1/config` path `1>16>7>138536474>146311580` is inspected for
-Onesie key presence and sizes, while `googlevideo.com/initplayback` UMP responses
-remain streamed. Only counts, sizes, content type and relative timing are recorded.
-Keys, query values and encrypted response bytes are never persisted.
+The filter mirrors the current open-source Maasea behavior without its external
+Cloudflare Worker. It acquires keys from the exact config path
+`1>16>7>138536474>146311580`, keeps them only in memory, verifies the request
+`encryptedClientKey`, parses UMP, verifies HMAC-SHA256, decrypts AES-128-CTR, and
+handles gzip/brotli. It removes only `PlayerResponse` fields 45/68,
+`PlaybackTracking` field 18, and `NextResponse` field 53 inside encrypted
+GetWatch contents.
 
-Start the low-latency interactive session:
+It reconstructs, recompresses, re-encrypts and signs locally. The original response
+is forwarded byte-for-byte on missing keys, HMAC failure, unsupported framing or
+compression, malformed protobuf, or zero applicable fields. Mutation is one-shot
+per proxy process and disabled in Compose.
+
+Protocol and schema references are pinned conceptually to Maasea `65075cdb`, the
+current [GoogleVideo UMP implementation](https://github.com/LuanRT/googlevideo),
+and the published [Innertube UMP documentation](https://github.com/davidzeng0/innertube/blob/main/googlevideo/ump.md).
+
+Enable the automatic session:
 
 ```bash
-sh scripts/youtube-ump-capture.sh run
+sh scripts/youtube-ump-filter.sh enable
 ```
 
-Keep this terminal open. Each prompt advances with a single `Enter` and writes the
-timestamp from the already-running process inside the observer container. The
-sequence covers video selection, visible ad start, content start, optional second
-ad, and a control video. Enter `s` only when prompted if no second ad appears.
-
-The interactive command restores the safe network defaults when it finishes or is
-interrupted. Then generate the minimized report:
+No markers or report are required. Fully close and reopen YouTube, then play a
+video normally. Persistent observation logging is disabled for this session. After
+the test, restore interception off and QUIC allowed:
 
 ```bash
-python3 scripts/analyze-youtube-ump.py
+sh scripts/youtube-ump-filter.sh disable
 ```
-
-The report selects the latest session, groups UMP events by the most recent manual
-marker, and includes a millisecond-relative timeline. It first establishes whether
-the current app actually uses the documented Onesie config and encrypted UMP path.
 
 The report focuses on protobuf marker counts, marker-specific nearest fields/distances, ancestor-chain frequencies and shared physical ancestor candidates. Shared candidates are computed from tag/payload coordinates in memory and emitted only as aggregate field/depth/size metadata; absolute positions and payload bytes are not persisted. These values are dry-run evidence, not blocking decisions; repeated ad/no-ad validation is required before any structural target can be configured for mutation.
 
@@ -320,8 +321,9 @@ sh scripts/quic.sh block
 sh scripts/quic.sh allow
 sh scripts/quic.sh status
 
-# observation-only Onesie/UMP session
-sh scripts/youtube-ump-capture.sh run
+# automatic one-shot Onesie/UMP filter
+sh scripts/youtube-ump-filter.sh enable
+sh scripts/youtube-ump-filter.sh disable
 
 # CA
 sh scripts/mitmproxy-ca.sh prepare
