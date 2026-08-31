@@ -555,6 +555,117 @@ class ProtobufStreamScanner:
         }
 
 
+def shared_marker_field_nodes(
+    data: bytes,
+    target_fields: tuple[int, ...] | list[int],
+    backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
+) -> list[CandidateDetail]:
+    """Return target protobuf nodes that physically contain every ad marker type.
+
+    Node identity is based on field number plus tag/payload coordinates, so a
+    leaf field and a same-number parent remain distinct. A node is eligible only
+    when the same physical payload encloses at least one occurrence of every
+    marker in MARKERS.
+    """
+
+    targets = {
+        int(field)
+        for field in target_fields
+        if int(field) > 1
+    }
+    if not data or not targets:
+        return []
+
+    marker_nodes: dict[
+        tuple[int, int, int, int],
+        set[str],
+    ] = {}
+    node_details: dict[
+        tuple[int, int, int, int],
+        CandidateDetail,
+    ] = {}
+
+    for marker_name, marker in MARKERS.items():
+        search_from = 0
+        while True:
+            marker_pos = data.find(marker, search_from)
+            if marker_pos < 0:
+                break
+
+            for candidate in _length_delimited_candidate_details(
+                data,
+                marker_pos,
+                len(marker),
+                backtrack_bytes,
+                require_complete_payload=True,
+            ):
+                field, _distance, tag_pos, payload_start, payload_end = (
+                    candidate
+                )
+                if field not in targets:
+                    continue
+                node_id = (
+                    field,
+                    tag_pos,
+                    payload_start,
+                    payload_end,
+                )
+                marker_nodes.setdefault(node_id, set()).add(marker_name)
+                node_details[node_id] = candidate
+
+            search_from = marker_pos + 1
+
+    required = set(MARKERS)
+    matches = [
+        node_details[node_id]
+        for node_id, marker_names in marker_nodes.items()
+        if required.issubset(marker_names)
+    ]
+    return sorted(
+        matches,
+        key=lambda item: (
+            item[4] - item[3],
+            item[2],
+            item[0],
+        ),
+    )
+
+
+def denature_shared_ad_fields(
+    data: bytes,
+    target_fields: tuple[int, ...] | list[int],
+    backtrack_bytes: int = DEFAULT_BACKTRACK_BYTES,
+) -> tuple[bytes, dict[int, int]]:
+    """Denature only validated target nodes containing all configured ad markers.
+
+    This avoids mutating same-number leaf fields that contain only one marker.
+    Each physical protobuf node is mutated at most once.
+    """
+
+    nodes = shared_marker_field_nodes(
+        data,
+        target_fields,
+        backtrack_bytes=backtrack_bytes,
+    )
+    if not nodes:
+        return data, {}
+
+    body = bytearray(data)
+    mutations: Counter[int] = Counter()
+
+    for field, _distance, tag_pos, _payload_start, _payload_end in nodes:
+        old = tag_bytes(field, 2)
+        new = tag_bytes(field - 1, 2)
+        if len(old) != len(new):
+            continue
+        if body[tag_pos : tag_pos + len(old)] != old:
+            continue
+        body[tag_pos : tag_pos + len(old)] = new
+        mutations[field] += 1
+
+    return bytes(body), dict(sorted(mutations.items()))
+
+
 def denature_ad_fields(
     data: bytes,
     target_fields: tuple[int, ...] | list[int],
@@ -636,3 +747,9 @@ if __name__ == "__main__":
     mutated, changes = denature_ad_fields(field, [target])
     assert changes == {target: 1}
     assert mutated != field and len(mutated) == len(field)
+    shared_mutated, shared_changes = denature_shared_ad_fields(
+        field,
+        [target],
+    )
+    assert shared_mutated == field
+    assert shared_changes == {}

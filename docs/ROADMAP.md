@@ -72,6 +72,7 @@
 - [x] Rank nearest verified enclosing protobuf fields and distances
 - [x] Correlate each ad marker with nearest field and protobuf ancestor chain
 - [x] Correlate shared protobuf ancestors by physical node for dry-run mutation planning
+- [x] Restrict mutation to shared physical nodes containing all ad markers
 - [x] Add protobuf field-denaturing mechanism behind disabled interlocks
 - [ ] Validate stable current-iOS candidate field numbers across repeated ad/no-ad captures
 - [ ] Run false-positive playback validation with an explicitly configured field list
