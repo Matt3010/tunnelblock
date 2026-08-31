@@ -668,6 +668,97 @@ def planned_field_counts(
     return dict(sorted(counts.items()))
 
 
+def _neutral_filler(length: int) -> bytes:
+    """Build an exact-length valid protobuf payload using zero-length high tags."""
+
+    if length < 3:
+        raise ValueError("neutral filler requires at least 3 bytes")
+
+    fillers = {
+        3: tag_bytes(2047, 2) + b"\x00",
+        4: tag_bytes(262143, 2) + b"\x00",
+        5: tag_bytes(33554431, 2) + b"\x00",
+        6: tag_bytes(MAX_FIELD_NUMBER, 2) + b"\x00",
+    }
+    if any(len(value) != size for size, value in fillers.items()):
+        raise AssertionError("unexpected protobuf filler width")
+
+    sixes, remainder = divmod(length, 6)
+    sizes = [6] * sixes
+
+    if remainder == 1:
+        if not sizes:
+            raise ValueError("cannot encode neutral filler length")
+        sizes.pop()
+        sizes.extend((3, 4))
+    elif remainder == 2:
+        if not sizes:
+            raise ValueError("cannot encode neutral filler length")
+        sizes.pop()
+        sizes.extend((4, 4))
+    elif remainder:
+        sizes.append(remainder)
+
+    filler = b"".join(fillers[size] for size in sizes)
+    if len(filler) != length:
+        raise AssertionError("neutral filler length mismatch")
+    return filler
+
+
+def neutralize_planned_nodes(
+    data: bytes,
+    nodes: list[CandidateDetail],
+) -> tuple[bytes, dict[int, int]]:
+    """Replace selected payloads in-place with valid unknown protobuf fields."""
+
+    if not data or not nodes:
+        return data, {}
+
+    body = bytearray(data)
+    neutralized: Counter[int] = Counter()
+    spans: list[tuple[int, int]] = []
+
+    for field, _distance, tag_pos, payload_start, payload_end in sorted(
+        nodes,
+        key=lambda item: item[3],
+    ):
+        if not (0 <= tag_pos < payload_start < payload_end <= len(data)):
+            continue
+        if any(
+            not (payload_end <= start or payload_start >= end)
+            for start, end in spans
+        ):
+            continue
+
+        key_decoded = decode_varint(data, tag_pos, max_bytes=5)
+        if key_decoded is None:
+            continue
+        key, key_end = key_decoded
+        if (key >> 3) != field or (key & 0x07) != 2:
+            continue
+
+        length_decoded = decode_varint(data, key_end, max_bytes=10)
+        if length_decoded is None:
+            continue
+        payload_length, decoded_payload_start = length_decoded
+        if (
+            decoded_payload_start != payload_start
+            or payload_start + payload_length != payload_end
+        ):
+            continue
+
+        try:
+            filler = _neutral_filler(payload_length)
+        except ValueError:
+            continue
+
+        body[payload_start:payload_end] = filler
+        spans.append((payload_start, payload_end))
+        neutralized[field] += 1
+
+    return bytes(body), dict(sorted(neutralized.items()))
+
+
 def denature_planned_nodes(
     data: bytes,
     nodes: list[CandidateDetail],
@@ -795,3 +886,11 @@ if __name__ == "__main__":
     )
     assert shared_mutated == field
     assert shared_changes == {}
+
+    neutralized, neutralized_changes = neutralize_planned_nodes(
+        field,
+        [(target, 0, 0, len(tag_bytes(target)) + 1, len(field))],
+    )
+    assert neutralized_changes == {target: 1}
+    assert len(neutralized) == len(field)
+    assert b"/pagead/" not in neutralized
