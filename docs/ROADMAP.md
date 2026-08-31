@@ -48,13 +48,14 @@
 
 ## M5 - HTTPS observation lab
 
-- [ ] Transparent HTTPS proxy container
-- [ ] Persistent private CA outside Git
-- [ ] Observation-only metadata logging
-- [ ] Reversible HTTPS interception toggle
-- [ ] Reversible QUIC/UDP 443 toggle
-- [ ] TLS/pinning/QUIC go/no-go diagnostics
-- [ ] Keep interception disabled by default
+- [x] Transparent HTTPS proxy container
+- [x] Persistent private CA outside Git
+- [x] Observation-only metadata logging
+- [x] Reversible HTTPS interception toggle
+- [x] Reversible QUIC/UDP 443 toggle
+- [x] IPv6 fail-closed policy during interception tests
+- [x] Keep interception disabled by default
+- [ ] Run the real iPhone TLS/pinning/QUIC go/no-go test
 
 ## M6 - YouTube experimental
 
