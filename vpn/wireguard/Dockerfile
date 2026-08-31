@@ -8,7 +8,7 @@ RUN apk add --no-cache \
     iptables \
     kmod \
     musl-utils \
-    qrencode \
+    libqrencode-tools \
     wireguard-tools
 
 WORKDIR /app
