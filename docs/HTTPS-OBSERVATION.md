@@ -8,7 +8,7 @@ It does not block YouTube ads. Its purpose is to answer three questions before a
 
 1. does the app use QUIC/HTTP/3 in a way that bypasses TCP interception?
 2. does the app accept a user-installed private CA?
-3. if TLS can be observed, are ad and normal-video requests distinguishable at HTTP level?
+3. if TLS can be observed, can ad-bearing InnerTube protobuf responses be identified without persisting payloads?
 
 The normal VPN remains unchanged while the lab is disabled.
 
@@ -64,7 +64,8 @@ Recorded fields can include:
 - method;
 - URL path **without query string**, with long/token-like path segments redacted;
 - response status;
-- HTTP version.
+- HTTP version;
+- for eligible InnerTube protobuf responses only: total scanned bytes, aggregate ad-marker counts and schema-free candidate field numbers near those markers.
 
 The addon does **not** persist:
 
@@ -76,19 +77,21 @@ The addon does **not** persist:
 - request bodies;
 - response bodies.
 
-Payloads are streamed through rather than buffered by the addon. Normal mitmdump flow
-output is disabled so Docker logs do not become a second, less-redacted traffic log.
-TLS failures are persisted only as coarse categories, never as raw library error strings.
+Request bodies and ordinary response bodies are streamed through rather than buffered by the addon. For `youtubei.googleapis.com/youtubei/v1/*`, the request is constrained to identity encoding and protobuf response bytes are scanned in-flight with a bounded tail buffer. The scanner looks for ad-related byte markers and plausible enclosing length-delimited field numbers, then forwards the original bytes unchanged. It never writes response payloads to disk.
+
+Active protobuf mutation is a separate opt-in path. It buffers only eligible InnerTube protobuf responses and can denature explicitly configured, previously validated field numbers near ad markers. The checked-in configuration has `PROTOBUF_BLOCKING_ENABLED=false` and an empty `PROTOBUF_BLOCK_FIELD_TAGS`, so discovery mode cannot mutate traffic.
+
+Normal mitmdump flow output is disabled so Docker logs do not become a second, less-redacted traffic log. TLS failures are persisted only as coarse categories, never as raw library error strings.
 
 The metadata log rotates at approximately 25 MiB.
 
-Generate an aggregate report that does not reproduce individual hosts or paths:
+Generate an aggregate report that does not reproduce individual hosts, paths or payloads:
 
 ```bash
 python3 scripts/analyze-youtube-observations.py
 ```
 
-`ad_related_candidate` means only that an endpoint name is associated with ad control or telemetry. It is not a blocking decision. `playback_related` identifies known playback/control paths, while `other_observed` is deliberately left unclassified.
+The report focuses on protobuf marker counts and candidate field hits. Candidate field numbers are schema-free observations, not blocking decisions; repeated ad/no-ad validation is required before any field can be configured for mutation.
 
 `mitmdump` runs with `flow_detail=0`, so its normal request/response flow summaries are not written to Docker stdout. The JSONL file above is the canonical observation log; container logs are reserved for proxy/runtime failures.
 
@@ -243,7 +246,9 @@ This is a go/no-go test, not proof that ads can be blocked safely.
 
 The real-device test passed. With QUIC allowed, part of the official YouTube iOS app traffic was visible over intercepted TCP. With UDP/443 blocked, video playback continued and the observer recorded successful TLS/HTTP exchanges for YouTube APIs and `googlevideo.com` playback endpoints. Some isolated TLS failures remain host-specific and do not establish app-wide pinning.
 
-This is a technical go for further metadata comparison only. It is not evidence that an ad request can be blocked without affecting playback.
+This is a technical go for deeper inspection only. A subsequent temporal ad/content test showed that path-level categories overlap across both phases: normal playback uses the same `googlevideo.com` delivery endpoints and ad-related telemetry can arrive during normal content. Those path labels are therefore no longer treated as prospective blocking rules.
+
+The next validation target is the InnerTube protobuf layer. Discovery mode must first show stable ad markers and repeatable candidate field numbers on the current iOS client before the disabled mutation path is allowed to touch traffic.
 
 ## Restore normal VPN behavior
 
