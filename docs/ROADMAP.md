@@ -78,6 +78,9 @@
 - [x] Reject field-tag denaturing as ineffective on live iOS test
 - [x] Add length-preserving shared-node payload neutralization
 - [x] Add protobuf field-denaturing mechanism behind disabled interlocks
-- [ ] Validate stable current-iOS candidate field numbers across repeated ad/no-ad captures
-- [ ] Run false-positive playback validation with an explicitly configured field list
-- [ ] Enable protobuf mutation only after validation succeeds
+- [x] Reject field-14 payload neutralization as ineffective on live iOS test
+- [x] Remove obsolete field mutation and generic decision-fingerprint controls
+- [x] Add privacy-minimized Onesie config and `initplayback`/UMP timeline capture
+- [ ] Validate that current YouTube iOS uses the observed Onesie/UMP path
+- [ ] Implement local encrypted UMP decoding only after the transport is confirmed
+- [ ] Identify and validate `adPlacements`/`adSlots` decision nodes before mutation

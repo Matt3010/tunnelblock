@@ -34,7 +34,7 @@ See `docs/HTTPS-OBSERVATION.md` for the diagnostic sequence.
 
 The real iPhone test demonstrated that HTTPS inspection is viable when QUIC is forced to fall back to TCP. A temporal ad/content comparison then showed that request paths are not a reliable blocker: `/videoplayback`, `/initplayback`, watch-time telemetry and ad-related endpoints can all appear across both windows.
 
-The experiment therefore moved one layer upstream to InnerTube protobuf responses. In discovery mode the proxy asks `youtubei.googleapis.com/youtubei/v1/*` for uncompressed responses, scans them in-flight for ad markers such as `/pagead/`, and records only aggregate marker counts plus plausible enclosing protobuf field numbers. Response bytes are not persisted and are forwarded unchanged.
+The experiment moved from marker correlation to the modern playback transport. It now observes the exact Onesie hot-config protobuf path and the timing/size of encrypted `googlevideo.com/initplayback` UMP responses. Response bytes, keys and query values are not persisted and traffic is forwarded unchanged.
 
 A first real iPhone temporal capture strongly validated this direction: the ad window contained 18 `/pagead/` markers across three protobuf responses (about 200 KiB scanned), while a roughly 29-second normal-content window contained one 36-byte protobuf response and zero ad markers. This validates the marker as a useful ad-window discriminator, but not yet any specific protobuf field number.
 
@@ -46,4 +46,4 @@ Aggregate the minimized log with:
 python3 scripts/analyze-youtube-observations.py
 ```
 
-The first live denaturing experiment proved that changing the selected `field 14` tag to another field number does not suppress the ad even when planned and applied counts match exactly. The next experiment therefore neutralizes only the payload of the exact shared physical node selected by the diagnostic scanner. Neutralization preserves the original tag, length prefix and total response length, replacing the payload with syntactically valid high-number unknown protobuf fields. This avoids rewriting enclosing parent lengths, which cannot yet be proven safe because schema-free ancestor discovery is bounded. Planned and neutralized field counts must match exactly or the original response is forwarded unchanged. The checked-in defaults remain observation-only, while `scripts/protobuf-mutation.sh enable <field>` creates an explicit runtime-only neutralization session; `disable` restores HTTPS interception off and QUIC allowed.
+Live tests proved that both renaming field 14 and neutralizing its complete payload leave the ad intact. That machinery has therefore been removed rather than retained as a misleading switch. No parent field is promoted automatically and the current UMP experiment does not mutate traffic.

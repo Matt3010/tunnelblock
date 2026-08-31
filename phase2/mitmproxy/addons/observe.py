@@ -4,18 +4,13 @@ import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from mitmproxy import http
 from mitmproxy import tls
 
-from protobuf_scan import (
-    DEFAULT_BACKTRACK_BYTES,
-    ProtobufStreamScanner,
-    neutralize_planned_nodes,
-    planned_field_counts,
-)
-from decision_fingerprint import structural_fingerprint
+from protobuf_scan import DEFAULT_BACKTRACK_BYTES, ProtobufStreamScanner
+from ump_diagnostics import ByteCounter, inspect_onesie_config
 
 LOG_PATH = Path(
     os.environ.get(
@@ -36,39 +31,12 @@ HOST_SUFFIXES = tuple(
 PROTOBUF_BACKTRACK_BYTES = int(
     os.environ.get("PROTOBUF_BACKTRACK_BYTES", str(DEFAULT_BACKTRACK_BYTES))
 )
-PROTOBUF_BLOCKING_ENABLED = (
-    os.environ.get("PROTOBUF_BLOCKING_ENABLED", "false").strip().lower()
-    in {"1", "true", "yes", "on"}
-)
 _lock = threading.Lock()
-DECISION_DIAGNOSTICS_ENABLED = (
-    os.environ.get("PROTOBUF_DECISION_DIAGNOSTICS_ENABLED", "false")
+UMP_DIAGNOSTICS_ENABLED = (
+    os.environ.get("UMP_DIAGNOSTICS_ENABLED", "false")
     .strip().lower() in {"1", "true", "yes", "on"}
 )
 OBSERVATION_SESSION = os.environ.get("OBSERVATION_SESSION", "").strip()
-
-
-def _parse_target_fields(raw: str) -> tuple[int, ...]:
-    if not raw.strip():
-        return ()
-    fields = []
-    for item in raw.split(","):
-        value = int(item.strip())
-        if value <= 1:
-            raise ValueError(
-                "PROTOBUF_BLOCK_FIELD_TAGS must contain field numbers greater than 1"
-            )
-        fields.append(value)
-    return tuple(dict.fromkeys(fields))
-
-
-PROTOBUF_BLOCK_FIELD_TAGS = _parse_target_fields(
-    os.environ.get("PROTOBUF_BLOCK_FIELD_TAGS", "")
-)
-if PROTOBUF_BLOCKING_ENABLED and not PROTOBUF_BLOCK_FIELD_TAGS:
-    raise ValueError(
-        "PROTOBUF_BLOCKING_ENABLED requires validated PROTOBUF_BLOCK_FIELD_TAGS"
-    )
 
 
 def _now() -> str:
@@ -199,8 +167,13 @@ def _emit_protobuf_scan(
         ],
         ancestor_chains_by_marker=result["ancestor_chains_by_marker"],
         shared_ancestor_candidates=result["shared_ancestor_candidates"],
-        blocking_enabled=PROTOBUF_BLOCKING_ENABLED,
+        blocking_enabled=False,
     )
+
+
+def _is_initplayback(host: str | None, path: str) -> bool:
+    normalized = (host or "").rstrip(".").lower()
+    return normalized.endswith(".googlevideo.com") and path == "/initplayback"
 
 
 def requestheaders(flow: http.HTTPFlow) -> None:
@@ -210,6 +183,23 @@ def requestheaders(flow: http.HTTPFlow) -> None:
         return
 
     path = _safe_path(request.path)
+    if UMP_DIAGNOSTICS_ENABLED and _is_initplayback(request.pretty_host, path):
+        try:
+            query_parameter_count = len(
+                parse_qsl(
+                    urlsplit(request.path).query,
+                    keep_blank_values=True,
+                )
+            )
+        except ValueError:
+            query_parameter_count = 0
+        _emit(
+            "ump_initplayback_request",
+            host=request.pretty_host,
+            path=path,
+            method=request.method,
+            query_parameter_count=query_parameter_count,
+        )
     if _is_inner_tube_request(request.pretty_host, path):
         # Ask YouTube for an uncompressed InnerTube response so the streaming
         # scanner can inspect protobuf bytes without persisting the payload.
@@ -224,7 +214,6 @@ def requestheaders(flow: http.HTTPFlow) -> None:
         port=request.port,
         http_version=request.http_version,
     )
-
 
 def responseheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
@@ -246,6 +235,32 @@ def responseheaders(flow: http.HTTPFlow) -> None:
         http_version=response.http_version,
     )
 
+    if UMP_DIAGNOSTICS_ENABLED and _is_initplayback(request.pretty_host, path):
+        counter = ByteCounter()
+        completed = False
+
+        def count_stream(chunk: bytes) -> bytes:
+            nonlocal completed
+            if chunk:
+                return counter.feed(chunk)
+            if not completed:
+                completed = True
+                _emit(
+                    "ump_initplayback_response",
+                    host=request.pretty_host,
+                    path=path,
+                    status_code=response.status_code,
+                    body_bytes=counter.body_bytes,
+                    chunks=counter.chunks,
+                    content_type=(
+                        response.headers.get("content-type") or ""
+                    ).split(";", 1)[0][:80],
+                )
+            return chunk
+
+        response.stream = count_stream
+        return
+
     if (
         not _is_inner_tube_request(request.pretty_host, path)
         or not _is_protobuf_content_type(response.headers.get("content-type"))
@@ -266,15 +281,9 @@ def responseheaders(flow: http.HTTPFlow) -> None:
         response.stream = True
         return
 
-    if (
-        (PROTOBUF_BLOCKING_ENABLED and PROTOBUF_BLOCK_FIELD_TAGS)
-        or DECISION_DIAGNOSTICS_ENABLED
-    ):
-        # Mutation is deliberately opt-in. Only this mode buffers matching
-        # InnerTube protobuf responses; discovery mode stays fully streamed.
-        # Configured field payloads are neutralized only when the same physical
-        # protobuf node contains every configured ad marker type. Neutralization
-        # preserves response length, so enclosing protobuf lengths stay valid.
+    if UMP_DIAGNOSTICS_ENABLED and path == "/youtubei/v1/config":
+        # Config is bounded and buffered only during an explicit diagnostic
+        # session. Secret key bytes are inspected in memory and never logged.
         flow.metadata["phase2_protobuf_buffered"] = True
         response.stream = False
         return
@@ -307,66 +316,9 @@ def response(flow: http.HTTPFlow) -> None:
     scanner.feed(body)
     _emit_protobuf_scan(request.pretty_host, path, scanner)
 
-    if DECISION_DIAGNOSTICS_ENABLED and path in {
-        "/youtubei/v1/player",
-        "/youtubei/v1/next",
-    }:
-        _emit(
-            "protobuf_decision_fingerprint",
-            host=request.pretty_host,
-            path=path,
-            body_bytes=len(body),
-            fingerprint=structural_fingerprint(body),
-        )
-
-    if not (PROTOBUF_BLOCKING_ENABLED and PROTOBUF_BLOCK_FIELD_TAGS):
-        return
-
-    planned_nodes = [
-        candidate
-        for candidate, _marker_hits, _depths in scanner.shared_nodes(
-            PROTOBUF_BLOCK_FIELD_TAGS
-        )
-    ]
-    planned_fields = planned_field_counts(planned_nodes)
-    neutralized, neutralizations = neutralize_planned_nodes(
-        body,
-        planned_nodes,
-    )
-
-    if neutralizations != planned_fields:
-        _emit(
-            "protobuf_response_neutralization_rejected",
-            host=request.pretty_host,
-            path=path,
-            reason="planned_neutralized_mismatch",
-            planned_fields={
-                str(field): count
-                for field, count in planned_fields.items()
-            },
-            neutralized_fields={
-                str(field): count
-                for field, count in neutralizations.items()
-            },
-        )
-        return
-
-    if neutralizations:
-        response.set_content(neutralized)
-        _emit(
-            "protobuf_response_neutralization",
-            host=request.pretty_host,
-            path=path,
-            neutralization_count=sum(neutralizations.values()),
-            planned_fields={
-                str(field): count
-                for field, count in planned_fields.items()
-            },
-            neutralized_fields={
-                str(field): count
-                for field, count in neutralizations.items()
-            },
-        )
+    if path == "/youtubei/v1/config":
+        _emit("onesie_config", host=request.pretty_host, path=path,
+              body_bytes=len(body), **inspect_onesie_config(body))
 
 
 def tls_clienthello(data: tls.ClientHelloData) -> None:
@@ -469,5 +421,4 @@ if __name__ == "__main__":
         "www.youtube.com", "/youtubei/v1/browse"
     )
     assert _is_protobuf_content_type("application/x-protobuf")
-    assert not PROTOBUF_BLOCKING_ENABLED or PROTOBUF_BLOCK_FIELD_TAGS
     assert _decode_alpn(b"h2") == "h2"

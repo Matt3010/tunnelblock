@@ -79,7 +79,7 @@ The addon does **not** persist:
 
 Request bodies and ordinary response bodies are streamed through rather than buffered by the addon. For `youtubei.googleapis.com/youtubei/v1/*`, the request is constrained to identity encoding and protobuf response bytes are scanned in-flight with a bounded tail buffer. The scanner looks for ad-related byte markers and plausible enclosing length-delimited field numbers, then forwards the original bytes unchanged. It never writes response payloads to disk.
 
-Active protobuf blocking is a separate opt-in path. It buffers only eligible InnerTube protobuf responses and neutralizes the payload of an explicitly configured, previously validated shared physical node. The exact node plan is produced by the same scanner instance used for the diagnostic record; no broader rescan occurs. Neutralization preserves the response byte length and all enclosing protobuf length prefixes by replacing only the selected payload bytes with valid zero-length high-number unknown fields. Planned and neutralized counts must match exactly or the original response is forwarded unchanged and a `protobuf_response_neutralization_rejected` event is logged. Compose defaults remain `PROTOBUF_BLOCKING_ENABLED=false` with an empty field list; runtime overrides are accepted only for an explicit test session through `scripts/protobuf-mutation.sh`.
+The field-number mutation path was removed after both tag denaturing and complete field-14 payload neutralization left ad playback unchanged in live tests. There is currently no blocking or mutation switch.
 
 Normal mitmdump flow output is disabled so Docker logs do not become a second, less-redacted traffic log. TLS failures are persisted only as coarse categories, never as raw library error strings.
 
@@ -91,59 +91,56 @@ Generate an aggregate report that does not reproduce individual hosts, paths or 
 python3 scripts/analyze-youtube-observations.py
 ```
 
-## Playback-decision fingerprint experiment
+## Onesie/UMP playback-decision experiment
 
 The marker-bearing `field 14` experiment showed correlation but not control:
 renaming its tag and then neutralizing its complete payload both left ad playback
 unchanged with exact planned/applied counts. Treat that branch as descriptive ad
 metadata, not as evidence of the player decision.
 
-The next experiment is observation-only. When explicitly started, it buffers only
-protobuf `/youtubei/v1/player` and `/youtubei/v1/next` responses in memory, parses
-their schema-free wire structure, and records truncated SHA-256 fingerprints,
-field/wire counts, nested field paths, coarse size/scalar buckets and relative timing.
-Scalar values, strings, media IDs and response bodies are never recorded. The
-original response is forwarded byte-for-byte and mutation remains disabled.
+The next experiment is observation-only and follows the current playback mechanism:
+the exact `/youtubei/v1/config` path `1>16>7>138536474>146311580` is inspected for
+Onesie key presence and sizes, while `googlevideo.com/initplayback` UMP responses
+remain streamed. Only counts, sizes, content type and relative timing are recorded.
+Keys, query values and encrypted response bytes are never persisted.
 
 Start one labeled session:
 
 ```bash
-sh scripts/youtube-decision-capture.sh start
+sh scripts/youtube-ump-capture.sh start
 ```
 
 Immediately before tapping a video expected to show an ad:
 
 ```bash
-sh scripts/youtube-decision-capture.sh mark ad-video-selected
+sh scripts/youtube-ump-capture.sh mark ad-video-selected
 ```
 
 Mark the visible transitions as promptly as possible:
 
 ```bash
-sh scripts/youtube-decision-capture.sh mark ad-start
-sh scripts/youtube-decision-capture.sh mark content-start
-sh scripts/youtube-decision-capture.sh mark second-ad-start
+sh scripts/youtube-ump-capture.sh mark ad-start
+sh scripts/youtube-ump-capture.sh mark content-start
+sh scripts/youtube-ump-capture.sh mark second-ad-start
 ```
 
 For a separate control video that starts directly with content, mark before the tap:
 
 ```bash
-sh scripts/youtube-decision-capture.sh mark control-video-selected
-sh scripts/youtube-decision-capture.sh mark content-start
+sh scripts/youtube-ump-capture.sh mark control-video-selected
+sh scripts/youtube-ump-capture.sh mark content-start
 ```
 
 Finish and restore the safe network defaults, then generate the minimized report:
 
 ```bash
-sh scripts/youtube-decision-capture.sh stop
-python3 scripts/analyze-youtube-decisions.py
+sh scripts/youtube-ump-capture.sh stop
+python3 scripts/analyze-youtube-ump.py
 ```
 
-The report selects the latest session, groups structural fingerprints by the most
-recent manual marker, and includes a millisecond-relative timeline. Differences
-that repeat before `ad-start` but not before control content are candidates for a
-later validation experiment; they are not automatically promoted to mutation
-targets.
+The report selects the latest session, groups UMP events by the most recent manual
+marker, and includes a millisecond-relative timeline. It first establishes whether
+the current app actually uses the documented Onesie config and encrypted UMP path.
 
 The report focuses on protobuf marker counts, marker-specific nearest fields/distances, ancestor-chain frequencies and shared physical ancestor candidates. Shared candidates are computed from tag/payload coordinates in memory and emitted only as aggregate field/depth/size metadata; absolute positions and payload bytes are not persisted. These values are dry-run evidence, not blocking decisions; repeated ad/no-ad validation is required before any structural target can be configured for mutation.
 
@@ -339,10 +336,9 @@ sh scripts/quic.sh block
 sh scripts/quic.sh allow
 sh scripts/quic.sh status
 
-# one-shot protobuf payload neutralization
-sh scripts/protobuf-mutation.sh enable 14
-sh scripts/protobuf-mutation.sh status
-sh scripts/protobuf-mutation.sh disable
+# observation-only Onesie/UMP session
+sh scripts/youtube-ump-capture.sh start
+sh scripts/youtube-ump-capture.sh stop
 
 # CA
 sh scripts/mitmproxy-ca.sh prepare
