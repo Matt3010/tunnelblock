@@ -401,8 +401,14 @@ def summarize(lines: list[str]) -> dict[str, object]:
                 record.get("planned_fields"),
             )
 
+    classification = "protobuf_discovery_only"
+    if protobuf_neutralizations > 0:
+        classification = "protobuf_payload_neutralization"
+    elif protobuf_mutations > 0:
+        classification = "protobuf_field_denature"
+
     return {
-        "classification": "protobuf_discovery_only",
+        "classification": classification,
         "blocking_observed": (
             protobuf_mutations > 0 or protobuf_neutralizations > 0
         ),
