@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import dgram from "node:dgram";
 import fs from "node:fs";
 import path from "node:path";
@@ -35,20 +34,11 @@ const app = Fastify({
   bodyLimit: 1024 * 1024,
 });
 
-app.addContentTypeParser(
-  "application/dns-message",
-  { parseAs: "buffer" },
-  (_request, body, done) => done(null, body),
-);
-
 const blocklists = new BlocklistManager(rulesDir, externalBlockPath);
 let rules = RuleEngine.fromFiles(blockPath, allowPath, externalBlockPath);
 
 const upstreamHost = process.env.UPSTREAM_DNS_HOST ?? "1.1.1.1";
 const upstreamPort = Number(process.env.UPSTREAM_DNS_PORT ?? 53);
-const publicDoHUrl =
-  process.env.PUBLIC_DOH_URL ??
-  "https://adblock.scanferlamatteo.work/dns-query";
 const adminToken = process.env.ADMIN_API_TOKEN;
 
 const startedAt = Date.now();
@@ -181,51 +171,6 @@ fs.watch(path.dirname(blockPath), (_eventType, filename) => {
   }, 150);
 });
 
-function buildMobileconfig(): string {
-  const dnsUuid = crypto.randomUUID().toUpperCase();
-  const profileUuid = crypto.randomUUID().toUpperCase();
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>PayloadContent</key>
-  <array>
-    <dict>
-      <key>PayloadType</key>
-      <string>com.apple.dnsSettings.managed</string>
-      <key>PayloadVersion</key>
-      <integer>1</integer>
-      <key>PayloadIdentifier</key>
-      <string>work.scanferlamatteo.adblock.doh</string>
-      <key>PayloadUUID</key>
-      <string>${dnsUuid}</string>
-      <key>PayloadDisplayName</key>
-      <string>AdBlock DNS</string>
-      <key>DNSSettings</key>
-      <dict>
-        <key>DNSProtocol</key>
-        <string>HTTPS</string>
-        <key>ServerURL</key>
-        <string>${publicDoHUrl}</string>
-      </dict>
-    </dict>
-  </array>
-  <key>PayloadType</key>
-  <string>Configuration</string>
-  <key>PayloadVersion</key>
-  <integer>1</integer>
-  <key>PayloadIdentifier</key>
-  <string>work.scanferlamatteo.adblock</string>
-  <key>PayloadUUID</key>
-  <string>${profileUuid}</string>
-  <key>PayloadDisplayName</key>
-  <string>AdBlock General Purpose</string>
-</dict>
-</plist>
-`;
-}
-
 async function forwardUdp(packet: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const socket = dgram.createSocket("udp4");
@@ -288,14 +233,6 @@ app.get("/ready", async (_request, reply) => {
     ok: true,
     statsStorage: "sqlite",
   };
-});
-
-app.get("/install", async (_request, reply) => {
-  return reply
-    .header("content-type", "application/x-apple-aspen-config")
-    .header("content-disposition", 'attachment; filename="adblock-general-purpose.mobileconfig"')
-    .header("cache-control", "no-store")
-    .send(buildMobileconfig());
 });
 
 app.get("/admin/status", async (request, reply) => {
@@ -530,42 +467,6 @@ app.post("/admin/rules/by-key", async (request, reply) => {
     return reply.code(400).send({
       error: error instanceof Error ? error.message : String(error),
     });
-  }
-});
-
-app.route({
-  method: ["GET", "POST"],
-  url: "/dns-query",
-  handler: async (request, reply) => {
-    let packet: Buffer;
-
-    if (request.method === "GET") {
-      const dns = (request.query as { dns?: string }).dns;
-      if (!dns) return reply.code(400).send("missing dns query parameter");
-
-      const normalized = dns
-        .replace(/-/g, "+")
-        .replace(/_/g, "/")
-        .padEnd(Math.ceil(dns.length / 4) * 4, "=");
-
-      packet = Buffer.from(normalized, "base64");
-    } else {
-      if (!Buffer.isBuffer(request.body)) {
-        return reply.code(415).send("expected application/dns-message");
-      }
-      packet = request.body;
-    }
-
-    try {
-      const result = await resolveDns(packet);
-      return reply
-        .header("content-type", "application/dns-message")
-        .header("cache-control", "no-store")
-        .send(result);
-    } catch (error) {
-      request.log.error({ error }, "dns-resolution-failed");
-      return reply.code(502).send("dns resolution failed");
-    }
   }
 });
 

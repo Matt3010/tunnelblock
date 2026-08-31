@@ -12,7 +12,6 @@ x-doh-common: &doh-common
     DNS_PORT: 53
     UPSTREAM_DNS_HOST: 1.1.1.1
     UPSTREAM_DNS_PORT: 53
-    PUBLIC_DOH_URL: https://adblock.scanferlamatteo.work/dns-query
     ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
     STATS_DB_PATH: /stats/stats.sqlite
   volumes:
@@ -41,19 +40,6 @@ services:
     networks:
       - default
       - vpn-dns
-
-  doh-proxy:
-    build:
-      context: .
-      dockerfile: proxy/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      doh-a:
-        condition: service_healthy
-      doh-b:
-        condition: service_healthy
-    ports:
-      - "8053:8053"
 
   wireguard:
     build:
@@ -187,8 +173,8 @@ services:
       dockerfile: telegram/Dockerfile
     restart: unless-stopped
     depends_on:
-      doh-proxy:
-        condition: service_started
+      doh-a:
+        condition: service_healthy
       updater:
         condition: service_healthy
     environment:

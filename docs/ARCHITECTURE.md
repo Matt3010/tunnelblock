@@ -25,12 +25,11 @@ Raspberry Pi / Docker
   |                         +--> doh-a:53
   |                         +--> doh-b:53
   |
-  +--> doh-a / doh-b
-  |      +--> same rule engine for DoH and raw DNS
+  +--> doh-a / doh-b (Docker-internal)
+  |      +--> rule engine for VPN raw DNS
   |      +--> shared rules under data/rules/
   |      +--> shared SQLite statistics volume
   |
-  +--> doh-proxy --> Cloudflare Tunnel --> public DoH
   +--> updater
   +--> telegram-bot
 ```
@@ -50,13 +49,10 @@ No host DNS port is published.
 
 ## Resolver path
 
-The existing resolver now accepts the same DNS packet format on:
-
-- DoH HTTP at port 8053;
-- raw UDP DNS at port 53;
-- raw TCP DNS at port 53.
-
-All three paths call the same filtering function before upstream resolution. Therefore VPN DNS uses the same allow/block rules and the same SQLite-backed statistics as the public DoH service.
+The resolver accepts raw UDP and TCP DNS on port 53 inside the `vpn-dns` network. Both
+paths call the same filtering function before upstream resolution and share the same
+allow/block rules and SQLite-backed statistics. Port 8053 remains Docker-internal for
+health and authenticated administration only; it no longer serves DoH or iOS profiles.
 
 ## Persistent WireGuard state
 
@@ -125,4 +121,4 @@ data/mitmproxy/
 
 It contains the private CA and minimized observation metadata and is covered by the repository's existing `data/` ignore rule.
 
-No mitmproxy endpoint or CA material is exposed through Caddy/Cloudflare.
+No mitmproxy endpoint or CA material is exposed publicly.

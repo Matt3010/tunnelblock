@@ -104,13 +104,12 @@ sh scripts/wireguard-client.sh conf
 
 The QR and raw configuration contain the client's private key and preshared key. Treat both as secrets and do not paste them into GitHub, Telegram logs or support messages.
 
-## Important: old managed DoH profile
+## Remove the old managed DoH profile
 
-For the Phase-1 DNS verification, temporarily disable/remove the previously installed managed DoH profile on the iPhone.
+Remove any previously installed AdBlock managed DoH profile from the iPhone. The project is
+WireGuard-only and no longer serves the profile or its public DoH endpoint.
 
-Otherwise iOS may continue sending encrypted DNS to the public DoH endpoint, which still travels through the VPN but makes it impossible to prove that the WireGuard-provided DNS server `10.66.66.1` is being used directly.
-
-The public DoH service itself remains available and unchanged.
+This ensures DNS is sent directly to the WireGuard-provided resolver `10.66.66.1`.
 
 ## Verification
 
@@ -211,4 +210,3 @@ docker compose exec -T wireguard wg show wg0
 ```
 
 The WireGuard healthcheck validates the persistent client configuration, `wg0`, the UDP listen port and the local DNS forwarder process.
-

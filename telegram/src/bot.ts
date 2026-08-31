@@ -92,13 +92,12 @@ async function cleanupTrackedMessages() {
 }
 
 await bot.setMyCommands([
-  { command: "status", description: "Stato del resolver DoH" },
+  { command: "status", description: "Stato del resolver VPN" },
   { command: "diag", description: "Diagnostica resolver e storage" },
   { command: "domains", description: "Gestisci domini Allow / Block" },
   { command: "lists", description: "Gestisci blocklist esterne" },
   { command: "topblocked", description: "Domini più bloccati" },
   { command: "topallowed", description: "Domini più richiesti" },
-  { command: "profile", description: "Link profilo iPhone" },
   { command: "update", description: "Aggiorna AdBlock" },
   { command: "update_status", description: "Stato aggiornamento" },
   { command: "help", description: "Mostra i comandi" },
@@ -413,7 +412,6 @@ function helpText(): string {
     "/topblocked",
     "/topallowed",
     "/reload",
-    "/profile",
     "/update",
     "/update_status",
     "/help",
@@ -685,7 +683,7 @@ bot.on("message", async msg => {
     if (text === "/status") {
       const status = await api("/admin/status");
       await sendTrackedMessage(chatId,
-        `DoH: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nBlocklist attive: ${status.blocklists ?? 0}\nDomini esterni unici: ${status.externalBlockedDomains ?? 0}\nDuplicati tra liste: ${status.blocklistDuplicateEntries ?? 0}\nListe in errore: ${status.blocklistErrors ?? 0}`
+        `DNS VPN: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nBlocklist attive: ${status.blocklists ?? 0}\nDomini esterni unici: ${status.externalBlockedDomains ?? 0}\nDuplicati tra liste: ${status.blocklistDuplicateEntries ?? 0}\nListe in errore: ${status.blocklistErrors ?? 0}`
       );
       return;
     }
@@ -717,7 +715,6 @@ bot.on("message", async msg => {
         ? [
             `doh-a: ${updaterResult.value.services.dohA ?? "unknown"}`,
             `doh-b: ${updaterResult.value.services.dohB ?? "unknown"}`,
-            `proxy: ${updaterResult.value.services.proxy ?? "unknown"}`,
             `wireguard: ${updaterResult.value.services.wireguard ?? "unknown"}`,
             `mitmproxy: ${updaterResult.value.services.mitmproxy ?? "unknown"}`,
             `bot: ${updaterResult.value.services.telegram ?? "unknown"}`,
@@ -787,11 +784,6 @@ bot.on("message", async msg => {
     if (text === "/reload") {
       await api("/admin/reload", { method: "POST", body: "{}" });
       await sendTrackedMessage(chatId, "Rules reloaded.");
-      return;
-    }
-
-    if (text === "/profile") {
-      await sendTrackedMessage(chatId, "https://adblock.scanferlamatteo.work/install");
       return;
     }
 
