@@ -126,7 +126,7 @@ data/mitmproxy/
 
 It contains the private CA and minimized observation metadata and is covered by the repository's existing `data/` ignore rule.
 
-The observer keeps normal HTTP payloads streamed. For uncompressed `youtubei.googleapis.com/youtubei/v1/*` protobuf responses it installs a streaming scanner that retains only a bounded tail in memory, counts ad-related byte markers and records schema-free candidate field numbers near those markers. Payload bytes are passed through unchanged and are never written to disk in discovery mode.
+The observer keeps normal HTTP payloads streamed. For uncompressed `youtubei.googleapis.com/youtubei/v1/*` protobuf responses it installs a streaming scanner that retains only a bounded tail in memory, counts ad-related byte markers and records the nearest plausible protobuf field plus distance statistics for those markers. Payload bytes are passed through unchanged and are never written to disk in discovery mode.
 
 The offline analyzer aggregates those protobuf counters without reproducing individual hosts, paths or payloads. A protobuf field-denaturing implementation also exists for later validation, but it is inert unless both blocking and an explicit validated field list are configured; the checked-in Compose configuration disables it.
 
