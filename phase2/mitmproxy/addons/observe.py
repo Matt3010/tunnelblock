@@ -16,7 +16,7 @@ from ump_diagnostics import (
     extract_onesie_keys,
     inspect_onesie_config,
 )
-from ump_filter import UmpStreamFilter
+from ump_filter import disable_preroll_request
 
 LOG_PATH = Path(
     os.environ.get(
@@ -277,6 +277,16 @@ def request(flow: http.HTTPFlow) -> None:
         elif _encrypted_key is not None:
             _client_key = None
             _encrypted_key = None
+    if not flow.metadata.get("phase2_ump_filter_eligible"):
+        return
+    if not _reserve_filter():
+        return
+    filtered, changes = disable_preroll_request(body)
+    if changes:
+        flow.request.set_content(filtered)
+        _finish_filter(True)
+    else:
+        _finish_filter(False)
 
 
 def responseheaders(flow: http.HTTPFlow) -> None:
@@ -298,27 +308,6 @@ def responseheaders(flow: http.HTTPFlow) -> None:
         status_code=response.status_code,
         http_version=response.http_version,
     )
-
-    if (
-        UMP_FILTER_ENABLED
-        and flow.metadata.get("phase2_ump_filter_eligible")
-        and _reserve_filter()
-    ):
-        with _lock:
-            key = _client_key
-        if key is None:
-            _finish_filter(False)
-            response.stream = True
-            return
-        stream_filter = UmpStreamFilter(key)
-        flow.metadata["phase2_ump_stream_filter"] = stream_filter
-        response.headers.pop("content-length", None)
-
-        def filter_stream(chunk: bytes) -> bytes:
-            return stream_filter.feed(chunk)
-
-        response.stream = filter_stream
-        return
 
     if UMP_DIAGNOSTICS_ENABLED and _is_initplayback(request.pretty_host, path):
         counter = ByteCounter()
@@ -401,11 +390,6 @@ def response(flow: http.HTTPFlow) -> None:
     if flow.response is None:
         return
 
-    stream_filter = flow.metadata.pop("phase2_ump_stream_filter", None)
-    if stream_filter is not None:
-        _finish_filter(stream_filter.changes > 0)
-        return
-
     if not flow.metadata.get("phase2_protobuf_buffered"):
         return
 
@@ -428,11 +412,6 @@ def response(flow: http.HTTPFlow) -> None:
                 _client_key, _encrypted_key = keys
         _emit("onesie_config", host=request.pretty_host, path=path,
               body_bytes=len(body), **inspect_onesie_config(body))
-
-
-def error(flow: http.HTTPFlow) -> None:
-    if flow.metadata.pop("phase2_ump_stream_filter", None) is not None:
-        _finish_filter(False)
 
 
 def tls_clienthello(data: tls.ClientHelloData) -> None:

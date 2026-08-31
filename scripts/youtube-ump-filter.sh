@@ -26,7 +26,7 @@ case "$ACTION" in
       cleanup
       exit 1
     fi
-    echo "YouTube UMP filter: enabled (automatic one-shot)"
+    echo "YouTube preroll request test: enabled (automatic one-shot)"
     echo "Persistent traffic logging: disabled"
     ;;
   disable)

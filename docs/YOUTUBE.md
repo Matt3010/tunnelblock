@@ -34,7 +34,7 @@ See `docs/HTTPS-OBSERVATION.md` for the diagnostic sequence.
 
 The real iPhone test demonstrated that HTTPS inspection is viable when QUIC is forced to fall back to TCP. A temporal ad/content comparison then showed that request paths are not a reliable blocker: `/videoplayback`, `/initplayback`, watch-time telemetry and ad-related endpoints can all appear across both windows.
 
-The implementation moved from marker correlation to the modern playback transport. The explicit one-shot filter acquires the exact Onesie hot-config keys in memory, verifies and decrypts `googlevideo.com/initplayback` UMP responses locally, removes schema-verified `adPlacements`/`adSlots`, then re-encrypts them. No keys, payloads or query values are persisted and no external Worker is used.
+The implementation moved from marker correlation to the modern playback transport. The explicit one-shot experiment acquires the exact Onesie hot-config keys in memory and verifies that an `initplayback` request belongs to that config. It then changes only `InnertubeRequest.enable_ad_placements_preroll` (field 13), as identified by the public [googlevideo Onesie schema](https://github.com/LuanRT/googlevideo/blob/main/protos/video_streaming/innertube_request.proto), from true to false. The request size is unchanged, planned and applied counts must match, and any mismatch forwards the original request. Responses are no longer mutated. No keys, payloads or query values are persisted and no external Worker is used.
 
 A first real iPhone temporal capture strongly validated this direction: the ad window contained 18 `/pagead/` markers across three protobuf responses (about 200 KiB scanned), while a roughly 29-second normal-content window contained one 36-byte protobuf response and zero ad markers. This validates the marker as a useful ad-window discriminator, but not yet any specific protobuf field number.
 
@@ -46,4 +46,4 @@ Aggregate the minimized log with:
 python3 scripts/analyze-youtube-observations.py
 ```
 
-Live tests proved that both renaming field 14 and neutralizing its complete payload leave the ad intact. That machinery has therefore been removed rather than retained as a misleading switch. No parent field is promoted automatically and the current UMP experiment does not mutate traffic.
+Live tests proved that renaming field 14, neutralizing its complete payload, and removing assumed response-side ad fields leave the ad intact. That machinery has therefore been removed rather than retained as a misleading switch. No parent response field is promoted automatically. The current test instead targets the explicit upstream preroll request flag and remains disabled by default and automatic one-shot when enabled.

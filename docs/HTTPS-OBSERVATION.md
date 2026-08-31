@@ -96,20 +96,21 @@ renaming its tag and then neutralizing its complete payload both left ad playbac
 unchanged with exact planned/applied counts. Treat that branch as descriptive ad
 metadata, not as evidence of the player decision.
 
-The filter mirrors the current open-source Maasea behavior without its external
-Cloudflare Worker. It acquires keys from the exact config path
-`1>16>7>138536474>146311580`, keeps them only in memory, verifies the request
-`encryptedClientKey`, parses UMP, verifies HMAC-SHA256, decrypts AES-128-CTR, and
-handles gzip/brotli. It removes only `PlayerResponse` fields 45/68,
-`PlaybackTracking` field 18, and `NextResponse` field 53 inside encrypted
-GetWatch contents.
+The current experiment uses the public Onesie schema rather than mirroring the
+private Maasea Worker. It acquires keys from the exact config path
+`1>16>7>138536474>146311580`, keeps them only in memory, and verifies the request
+`encryptedClientKey`. On the first eligible request it changes only
+`InnertubeRequest.enable_ad_placements_preroll` (field 13) from true to false.
 
-It reconstructs, recompresses, re-encrypts and signs locally. The original response
-is forwarded byte-for-byte on missing keys, HMAC failure, unsupported framing or
-compression, malformed protobuf, or zero applicable fields. Mutation is one-shot
-per proxy process, applies only to an authenticated encrypted UMP control pair,
-and is disabled in Compose. Ordinary `/player` responses remain byte-for-byte
-unchanged so the one-shot cannot split duplicated player state across transports.
+The replacement has the same encoded size and requires exact planned/applied
+counts. Missing keys, an absent or already-false flag, unexpected wire type,
+non-boolean value, malformed protobuf, or any size mismatch forwards the original
+request. Responses are never modified. The experiment is one-shot per proxy
+process and disabled in Compose.
+
+Earlier response-side experiments targeted `PlayerResponse` fields 45/68,
+`PlaybackTracking` field 18 and `NextResponse` field 53 inside encrypted GetWatch
+contents. Live testing showed no ad-blocking benefit, so that code was removed.
 
 Protocol and schema references are pinned conceptually to Maasea `65075cdb`, the
 current [GoogleVideo UMP implementation](https://github.com/LuanRT/googlevideo),
