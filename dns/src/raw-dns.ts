@@ -93,7 +93,7 @@ export async function startRawDnsServer(options: {
   await bindUdp(udp, port, host);
 
   const tcp = net.createServer(socket => {
-    let pending = Buffer.alloc(0);
+    let pending: Buffer = Buffer.alloc(0);
     let chain = Promise.resolve();
 
     socket.on("data", chunk => {
