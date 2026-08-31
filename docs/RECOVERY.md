@@ -1,51 +1,32 @@
 # Availability and recovery
 
-The primary DoH endpoint is served by two resolver replicas behind a stable Caddy proxy.
+The production client path is WireGuard-only. Do not run `docker compose down -v`, and never
+delete `data/wireguard/` or `data/mitmproxy/` during recovery.
 
-```text
-Cloudflare Tunnel
-      |
-      v
-doh-proxy :8053
-   |        |
-   v        v
-doh-a     doh-b
-```
+## Normal recovery
 
-During a normal deployment, update one resolver at a time. Do not use `docker compose down`.
+Use `/update` in the Telegram bot for deployments. The updater performs preflight checks and
+rolls back without deleting persistent data. Do not invoke `sh ops/deploy.sh` directly.
 
-Use:
+Check the stack with:
 
 ```bash
-sh scripts/deploy.sh
+docker compose ps
+docker compose exec -T wireguard /app/healthcheck.sh
+docker compose exec -T wireguard wg show wg0
 ```
 
-## If the Raspberry Pi or Cloudflare Tunnel is completely offline
+If the tunnel is unavailable, temporarily disable WireGuard in the official iOS app to restore
+ordinary device connectivity while diagnosing the Raspberry, router UDP/51820 forwarding or ISP.
 
-A local redundant container cannot protect against power loss, ISP loss, Raspberry failure or Cloudflare Tunnel failure.
+## Phase 2 safe state
 
-On the iPhone, remove/disable the AdBlock DNS profile temporarily:
+Return the observation lab to its default state with:
 
-```text
-Settings
--> General
--> VPN & Device Management
--> AdBlock General Purpose
--> Remove Profile
+```bash
+sh scripts/https-intercept.sh disable
+sh scripts/quic.sh allow
+sh scripts/phase2-status.sh
 ```
 
-The phone will immediately return to the network-provided DNS.
-
-Once:
-
-```text
-https://adblock.scanferlamatteo.work/health
-```
-
-is healthy again, reinstall from:
-
-```text
-https://adblock.scanferlamatteo.work/install
-```
-
-A true automatic off-site fallback requires a second independently hosted DoH endpoint.
+These commands do not delete the persistent private CA or metadata log.

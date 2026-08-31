@@ -1,8 +1,7 @@
 # adblock-general-purpose
 
-Self-hosted iOS ad-blocking stack running on a Raspberry Pi.
-
-The primary client path is now a WireGuard **full tunnel**. The existing public DNS-over-HTTPS endpoint remains available and is not replaced by the VPN.
+Self-hosted iOS ad-blocking stack running on a Raspberry Pi. Clients use a WireGuard
+**full tunnel**; no public DNS-over-HTTPS endpoint is exposed.
 
 ## Architecture
 
@@ -25,12 +24,9 @@ Raspberry Pi / Docker
   |               +--> doh-a:53
   |               +--> doh-b:53
   |
-  +--> doh-a + doh-b
+  +--> doh-a + doh-b (Docker-internal only)
   |      +--> shared allow/block rules
   |      +--> shared persistent SQLite statistics
-  |
-  +--> doh-proxy
-  |      +--> public /dns-query, /install, /health only
   |
   +--> updater
   +--> telegram-bot
@@ -53,21 +49,11 @@ WireGuard server/client private keys, the preshared key, generated client config
 
 Never use `docker compose down -v` as part of normal deployment or recovery.
 
-## Existing public DoH
+## WireGuard-only exposure
 
-The current endpoint remains:
-
-```text
-https://adblock.scanferlamatteo.work/dns-query
-```
-
-Cloudflare Tunnel continues to terminate the public path and Caddy exposes only:
-
-- `/dns-query`
-- `/install`
-- `/health`
-
-Admin endpoints remain Docker-internal.
+The resolver HTTP/admin API and raw DNS replicas are Docker-internal. The host publishes
+only WireGuard UDP/51820; there is no public DoH, profile-download or resolver health endpoint.
+The iPhone receives DNS `10.66.66.1` from its WireGuard configuration.
 
 ## WireGuard Phase 1
 

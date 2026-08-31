@@ -10,8 +10,8 @@ possible future diagnostics and does not run a YouTube-specific blocking policy 
 
 ## Important limitation
 
-The managed DoH profile and VPN resolver observe DNS traffic for the whole iPhone, not just the
-YouTube app. Background iOS/app activity can therefore contaminate any DNS-level measurement.
+The VPN resolver observes DNS traffic for the whole iPhone, not just the YouTube app.
+Background iOS/app activity can therefore contaminate any DNS-level measurement.
 
 Any future YouTube work must first verify whether the official iOS app can be observed safely at
 the HTTPS request layer, including TLS certificate pinning and QUIC behavior. DNS-only domain

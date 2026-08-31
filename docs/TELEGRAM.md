@@ -1,6 +1,6 @@
 # Telegram bot
 
-The Telegram bot is the remote control panel for the DoH resolver.
+The Telegram bot is the remote control panel for the WireGuard DNS resolver.
 
 ## Commands
 
@@ -12,7 +12,6 @@ The Telegram bot is the remote control panel for the DoH resolver.
 /topblocked
 /topallowed
 /reload
-/profile
 /update
 /update_status
 /help
@@ -46,6 +45,6 @@ ADMIN_API_TOKEN
 ## Security
 
 - Do not commit Telegram tokens.
-- The public reverse proxy does not forward `/admin/*`.
+- Resolver administration stays on the internal Docker network.
 - The bot talks directly to the resolver on the Docker network.
 - Rules and external-list caches are persisted under the mounted rules directory.

@@ -92,7 +92,6 @@ verify_stack() {
   wait_service doh-a healthy || return 1
   wait_service doh-b healthy || return 1
   wait_service updater healthy || return 1
-  wait_service doh-proxy running || return 1
   wait_service telegram-bot running || return 1
   wait_service wireguard healthy || return 1
 
@@ -166,7 +165,9 @@ rollback_previous() (
   wait_service doh-a healthy
   wait_service doh-b healthy
   wait_service updater healthy
-  wait_service doh-proxy running
+  if docker compose config --services | grep -qx doh-proxy; then
+    wait_service doh-proxy running
+  fi
   wait_service telegram-bot running
   if docker compose config --services | grep -qx wireguard; then
     wait_service wireguard healthy

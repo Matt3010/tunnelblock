@@ -9,7 +9,7 @@
 - [x] Telegram administration
 - [x] Automatic updater with rollback
 
-## M1 - Public DoH
+## M1 - Public DoH (retired)
 
 - [x] DoH GET/POST endpoint
 - [x] Domain filtering
@@ -17,6 +17,8 @@
 - [x] Dynamic iOS managed DoH profile at `/install`
 - [x] Cloudflare-compatible public deployment
 - [x] Public/admin endpoint isolation
+- [x] Retired after migration to WireGuard-only access
+- [x] Removed public proxy, DoH route and managed iOS profile
 
 ## M2 - Rule feeds and diagnostics
 
