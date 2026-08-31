@@ -123,12 +123,6 @@ services:
       - 0.0.0.0
       - --listen-port
       - "8080"
-      - --set
-      - connection_strategy=lazy
-      - --set
-      - stream_large_bodies=1m
-      - --set
-      - flow_detail=0
       - -s
       - /addons/observe.py
     healthcheck:
