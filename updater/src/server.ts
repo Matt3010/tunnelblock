@@ -455,11 +455,13 @@ app.get("/status", async (request, reply) => {
     currentSha = await localSha();
   } catch {}
 
-  const [dohA, dohB, proxy, telegram] = await Promise.all([
+  const [dohA, dohB, proxy, telegram, wireguard, mitmproxy] = await Promise.all([
     serviceRuntimeState("doh-a"),
     serviceRuntimeState("doh-b"),
     serviceRuntimeState("doh-proxy"),
     serviceRuntimeState("telegram-bot"),
+    serviceRuntimeState("wireguard"),
+    serviceRuntimeState("mitmproxy"),
   ]);
 
   const state = liveUpdateState();
@@ -479,6 +481,8 @@ app.get("/status", async (request, reply) => {
       dohB,
       proxy,
       telegram,
+      wireguard,
+      mitmproxy,
     },
   };
 });
