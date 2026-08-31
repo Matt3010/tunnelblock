@@ -142,6 +142,9 @@ deploy_target() (
   log "== Pre-flight: WireGuard/Phase-2 shell checks =="
   sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/phase2-firewall.sh scripts/wireguard-client.sh scripts/https-intercept.sh scripts/quic.sh scripts/phase2-status.sh scripts/mitmproxy-ca.sh >>"$LOG_FILE" 2>&1
 
+  log "== Pre-flight: Phase-2 Python checks =="
+  python3 -B -m unittest phase2/mitmproxy/test_analyze_observations.py >>"$LOG_FILE" 2>&1
+
   log "== Pre-flight: DNS tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1
 

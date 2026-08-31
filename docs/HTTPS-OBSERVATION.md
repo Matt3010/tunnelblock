@@ -82,6 +82,14 @@ TLS failures are persisted only as coarse categories, never as raw library error
 
 The metadata log rotates at approximately 25 MiB.
 
+Generate an aggregate report that does not reproduce individual hosts or paths:
+
+```bash
+python3 scripts/analyze-youtube-observations.py
+```
+
+`ad_related_candidate` means only that an endpoint name is associated with ad control or telemetry. It is not a blocking decision. `playback_related` identifies known playback/control paths, while `other_observed` is deliberately left unclassified.
+
 `mitmdump` runs with `flow_detail=0`, so its normal request/response flow summaries are not written to Docker stdout. The JSONL file above is the canonical observation log; container logs are reserved for proxy/runtime failures.
 
 ## Architecture
@@ -230,6 +238,12 @@ Interpretation:
 - no matching events even with QUIC blocked: traffic may use other hostnames/transports and needs further measurement.
 
 This is a go/no-go test, not proof that ads can be blocked safely.
+
+## Validated iPhone result
+
+The real-device test passed. With QUIC allowed, part of the official YouTube iOS app traffic was visible over intercepted TCP. With UDP/443 blocked, video playback continued and the observer recorded successful TLS/HTTP exchanges for YouTube APIs and `googlevideo.com` playback endpoints. Some isolated TLS failures remain host-specific and do not establish app-wide pinning.
+
+This is a technical go for further metadata comparison only. It is not evidence that an ad request can be blocked without affecting playback.
 
 ## Restore normal VPN behavior
 

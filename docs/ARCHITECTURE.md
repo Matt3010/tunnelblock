@@ -126,4 +126,6 @@ data/mitmproxy/
 
 It contains the private CA and minimized observation metadata and is covered by the repository's existing `data/` ignore rule.
 
+The offline observation analyzer reads that JSONL file and emits aggregate counters only. Its candidate ad/playback labels are diagnostic output and are not connected to mitmproxy request handling or firewall rules.
+
 No mitmproxy endpoint or CA material is exposed publicly.
