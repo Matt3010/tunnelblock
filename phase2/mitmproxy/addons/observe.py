@@ -12,7 +12,7 @@ from mitmproxy import tls
 from protobuf_scan import (
     DEFAULT_BACKTRACK_BYTES,
     ProtobufStreamScanner,
-    denature_ad_fields,
+    denature_shared_ad_fields,
 )
 
 LOG_PATH = Path(
@@ -261,6 +261,8 @@ def responseheaders(flow: http.HTTPFlow) -> None:
     if PROTOBUF_BLOCKING_ENABLED and PROTOBUF_BLOCK_FIELD_TAGS:
         # Mutation is deliberately opt-in. Only this mode buffers matching
         # InnerTube protobuf responses; discovery mode stays fully streamed.
+        # Configured field numbers are mutated only when the same physical
+        # protobuf node contains every configured ad marker type.
         flow.metadata["phase2_protobuf_buffered"] = True
         response.stream = False
         return
@@ -293,7 +295,7 @@ def response(flow: http.HTTPFlow) -> None:
     scanner.feed(body)
     _emit_protobuf_scan(request.pretty_host, path, scanner)
 
-    mutated, mutations = denature_ad_fields(
+    mutated, mutations = denature_shared_ad_fields(
         body,
         PROTOBUF_BLOCK_FIELD_TAGS,
         backtrack_bytes=PROTOBUF_BACKTRACK_BYTES,
