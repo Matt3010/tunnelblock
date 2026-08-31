@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-docker compose ps wireguard mitmproxy
+docker compose --profile https-lab ps wireguard mitmproxy
 printf '\n'
 sh scripts/https-intercept.sh status
 sh scripts/quic.sh status

@@ -95,9 +95,6 @@ verify_stack() {
   wait_service doh-proxy running || return 1
   wait_service telegram-bot running || return 1
   wait_service wireguard healthy || return 1
-  if docker compose config --services | grep -qx mitmproxy; then
-    wait_service mitmproxy healthy || return 1
-  fi
 
   for i in $(seq 1 30); do
     if verify_updater_revision "$EXPECTED_SHA"; then
@@ -133,6 +130,9 @@ deploy_target() (
   docker compose run --rm --no-deps --entrypoint npm updater run typecheck >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight passed =="
+  log "== Ensure Phase-2 lab is off =="
+  docker compose --profile https-lab stop mitmproxy >>"$LOG_FILE" 2>&1 || true
+
   log "== Recreate complete stack =="
   docker compose up -d --force-recreate --remove-orphans >>"$LOG_FILE" 2>&1
 
@@ -158,9 +158,6 @@ rollback_previous() (
   wait_service telegram-bot running
   if docker compose config --services | grep -qx wireguard; then
     wait_service wireguard healthy
-  fi
-  if docker compose config --services | grep -qx mitmproxy; then
-    wait_service mitmproxy healthy
   fi
   verify_updater_revision "$PREVIOUS_SHA"
 )

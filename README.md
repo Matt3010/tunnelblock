@@ -90,8 +90,8 @@ The repository now also contains a diagnostic transparent-proxy lab for YouTube 
 
 It is designed to be safe by default:
 
-- `mitmproxy` runs with no host/router port exposure;
-- HTTPS interception is disabled until `scripts/https-intercept.sh enable` is run;
+- the `mitmproxy` service itself is stopped by default and has no host/router port exposure;
+- `scripts/https-intercept.sh enable` starts the observer and only then installs the HTTPS redirect;
 - QUIC blocking is disabled until `scripts/quic.sh block` is run;
 - the private CA and logs persist only under ignored `data/mitmproxy/`;
 - only metadata for YouTube-related hosts is written;

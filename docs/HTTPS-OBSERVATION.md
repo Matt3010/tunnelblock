@@ -16,6 +16,7 @@ The normal VPN remains unchanged while the lab is disabled.
 
 The lab is deliberately fail-safe:
 
+- the mitmproxy observer service is **stopped by default**;
 - HTTPS interception is **disabled by default**;
 - QUIC blocking is **disabled by default**;
 - no proxy port is published on the Raspberry host or router;
@@ -120,16 +121,22 @@ Expected initial state:
 
 ```text
 wireguard: healthy
-mitmproxy: healthy
+mitmproxy: stopped
 HTTPS IPv4 interception: disabled
 QUIC IPv4 UDP/443: allowed
 ```
 
-The mitmproxy container may run continuously; without the iptables REDIRECT rule it receives no iPhone HTTPS traffic.
+The observer is started only for an explicit HTTPS test or briefly while preparing the CA. Normal updater deployments stop it and leave it inactive.
 
 ## Public CA export
 
-Check that the CA exists:
+Generate the persistent CA without enabling HTTPS interception:
+
+```bash
+sh scripts/mitmproxy-ca.sh prepare
+```
+
+Then check that the public certificate exists:
 
 ```bash
 sh scripts/mitmproxy-ca.sh status
@@ -203,8 +210,8 @@ docker compose logs --tail=100 mitmproxy
 
 Interpretation:
 
-- `tls_clienthello` followed by `http_request`: TLS interception is viable for that host;
-- `tls_clienthello` but no HTTP request, with TLS errors/app failure: likely CA rejection or certificate pinning;
+- `tls_clienthello` followed by `tls_established_client` and `http_request`: TLS interception is viable for that host;
+- `tls_clienthello` followed by `tls_failed_client`, or app failure before any HTTP request: likely CA rejection or certificate pinning;
 - no matching events even with QUIC blocked: traffic may use other hostnames/transports and needs further measurement.
 
 This is a go/no-go test, not proof that ads can be blocked safely.
@@ -243,6 +250,7 @@ sh scripts/quic.sh allow
 sh scripts/quic.sh status
 
 # CA
+sh scripts/mitmproxy-ca.sh prepare
 sh scripts/mitmproxy-ca.sh status
 sh scripts/mitmproxy-ca.sh export-ios
 sh scripts/mitmproxy-ca.sh fingerprint
