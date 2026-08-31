@@ -11,3 +11,4 @@ ip link show wg0 >/dev/null 2>&1
 wg show wg0 >/dev/null 2>&1
 test "$(wg show wg0 listen-port)" = "$SERVER_PORT"
 pidof dnsmasq >/dev/null 2>&1
+pidof httpd >/dev/null 2>&1

@@ -45,6 +45,11 @@ It has:
 
 This prevents a VPN client from receiving a route to updater, Telegram or the resolver admin HTTP API. DNS is exposed to the peer only through `10.66.66.1:53` inside the WireGuard interface.
 
+The namespace also serves the public mitmproxy CA certificate on `10.66.66.1:8081`.
+Its read-only document root is a separate bind mount containing only the DER certificate;
+private CA material is never mounted into the gateway. Port 8081 is bound to the WireGuard
+address and is not published by Docker or forwarded by the router.
+
 No host DNS port is published.
 
 ## Resolver path

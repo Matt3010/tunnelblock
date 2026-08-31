@@ -55,6 +55,9 @@ The resolver HTTP/admin API and raw DNS replicas are Docker-internal. The host p
 only WireGuard UDP/51820; there is no public DoH, profile-download or resolver health endpoint.
 The iPhone receives DNS `10.66.66.1` from its WireGuard configuration.
 
+After preparing the private CA, its public certificate is available only inside the VPN at
+`http://10.66.66.1:8081/mitmproxy-ca-cert.cer`. Docker does not publish this port on the host.
+
 ## WireGuard Phase 1
 
 Phase 1 provides only:
