@@ -101,6 +101,47 @@ services:
       retries: 5
       start_period: 10s
 
+  mitmproxy:
+    build:
+      context: .
+      dockerfile: phase2/mitmproxy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      wireguard:
+        condition: service_healthy
+    network_mode: "service:wireguard"
+    environment:
+      OBSERVATION_LOG: /home/mitmproxy/.mitmproxy/observations/metadata.jsonl
+      OBSERVATION_MAX_BYTES: 26214400
+    volumes:
+      - ${HOST_REPO_DIR:-.}/data/mitmproxy:/home/mitmproxy/.mitmproxy
+    command:
+      - mitmdump
+      - --mode
+      - transparent
+      - --listen-host
+      - 0.0.0.0
+      - --listen-port
+      - "8080"
+      - --set
+      - connection_strategy=lazy
+      - --set
+      - stream_large_bodies=1m
+      - --set
+      - flow_detail=0
+      - -s
+      - /addons/observe.py
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; s=socket.create_connection(('127.0.0.1',8080),2); s.close()"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
   updater:
     image: adblock-general-purpose-updater:latest
     build:
