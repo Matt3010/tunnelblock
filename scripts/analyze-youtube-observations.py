@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize minimized mitmproxy metadata without inspecting payloads."""
+"""Summarize minimized YouTube/mitmproxy metadata without exposing payloads."""
 
 from __future__ import annotations
 
@@ -10,38 +10,28 @@ from collections import Counter
 from pathlib import Path
 
 
-AD_PATH_PREFIXES = (
-    "/api/stats/ads",
-    "/pagead/",
-    "/pcs/activeview",
-    "/ptracking",
-    "/youtubei/v1/player/ad_break",
-)
-PLAYBACK_PATH_PREFIXES = (
-    "/initplayback",
-    "/videogoodput",
-    "/videoplayback",
-    "/youtubei/v1/player",
-)
-
-
-def classify(record: dict[str, object]) -> str | None:
-    if record.get("event") != "http_request":
-        return None
-    path = str(record.get("path", ""))
-    if path.startswith(AD_PATH_PREFIXES):
-        return "ad_related_candidate"
-    if path.startswith(PLAYBACK_PATH_PREFIXES):
-        return "playback_related"
-    return "other_observed"
+def _counter_from_mapping(counter: Counter[str], value: object) -> None:
+    if not isinstance(value, dict):
+        return
+    for key, count in value.items():
+        try:
+            counter[str(key)] += int(count)
+        except (TypeError, ValueError):
+            continue
 
 
 def summarize(lines: list[str]) -> dict[str, object]:
     events: Counter[str] = Counter()
-    candidates: Counter[str] = Counter()
     transports: Counter[str] = Counter()
     http_versions: Counter[str] = Counter()
     tls_failures: Counter[str] = Counter()
+    protobuf_markers: Counter[str] = Counter()
+    protobuf_fields: Counter[str] = Counter()
+    protobuf_mutated_fields: Counter[str] = Counter()
+    protobuf_responses_scanned = 0
+    protobuf_responses_skipped = 0
+    protobuf_bytes_scanned = 0
+    protobuf_mutations = 0
     invalid_lines = 0
 
     for line in lines:
@@ -56,9 +46,6 @@ def summarize(lines: list[str]) -> dict[str, object]:
 
         event = str(record.get("event", "unknown"))
         events[event] += 1
-        category = classify(record)
-        if category:
-            candidates[category] += 1
         if record.get("transport"):
             transports[str(record["transport"])] += 1
         if record.get("http_version"):
@@ -66,16 +53,55 @@ def summarize(lines: list[str]) -> dict[str, object]:
         if event.startswith("tls_failed"):
             tls_failures[str(record.get("error_category", "unknown"))] += 1
 
+        if event == "protobuf_response_scan":
+            protobuf_responses_scanned += 1
+            try:
+                protobuf_bytes_scanned += int(record.get("body_bytes", 0))
+            except (TypeError, ValueError):
+                pass
+            _counter_from_mapping(protobuf_markers, record.get("markers"))
+            _counter_from_mapping(
+                protobuf_fields, record.get("candidate_fields")
+            )
+        elif event == "protobuf_response_scan_skipped":
+            protobuf_responses_skipped += 1
+        elif event == "protobuf_response_mutation":
+            try:
+                protobuf_mutations += int(record.get("mutation_count", 0))
+            except (TypeError, ValueError):
+                pass
+            _counter_from_mapping(
+                protobuf_mutated_fields, record.get("mutated_fields")
+            )
+
     return {
-        "classification": "candidate_signals_only",
-        "blocking_enabled": False,
+        "classification": "protobuf_discovery_only",
+        "blocking_observed": protobuf_mutations > 0,
         "records": sum(events.values()),
         "invalid_lines": invalid_lines,
         "events": dict(sorted(events.items())),
-        "request_categories": dict(sorted(candidates.items())),
         "http_versions": dict(sorted(http_versions.items())),
         "tls_transports": dict(sorted(transports.items())),
         "tls_failures": dict(sorted(tls_failures.items())),
+        "protobuf": {
+            "responses_scanned": protobuf_responses_scanned,
+            "responses_skipped": protobuf_responses_skipped,
+            "bytes_scanned": protobuf_bytes_scanned,
+            "marker_occurrences": dict(sorted(protobuf_markers.items())),
+            "candidate_field_hits": dict(
+                sorted(
+                    protobuf_fields.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ),
+            "mutations": protobuf_mutations,
+            "mutated_field_hits": dict(
+                sorted(
+                    protobuf_mutated_fields.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ),
+        },
     }
 
 
