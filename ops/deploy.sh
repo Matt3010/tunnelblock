@@ -156,6 +156,9 @@ rollback_previous() (
   wait_service updater healthy
   wait_service doh-proxy running
   wait_service telegram-bot running
+  if docker compose config --services | grep -qx wireguard; then
+    wait_service wireguard healthy
+  fi
   if docker compose config --services | grep -qx mitmproxy; then
     wait_service mitmproxy healthy
   fi
