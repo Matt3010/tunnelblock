@@ -277,7 +277,9 @@ def summarize(lines: list[str]) -> dict[str, object]:
     ] = {}
     protobuf_ancestor_chains: dict[str, Counter[str]] = {}
     protobuf_shared_ancestors: dict[str, dict[str, object]] = {}
+    protobuf_planned_fields: Counter[str] = Counter()
     protobuf_mutated_fields: Counter[str] = Counter()
+    protobuf_mutation_rejections = 0
     protobuf_responses_scanned = 0
     protobuf_responses_skipped = 0
     protobuf_bytes_scanned = 0
@@ -361,8 +363,18 @@ def summarize(lines: list[str]) -> dict[str, object]:
             except (TypeError, ValueError):
                 pass
             _counter_from_mapping(
+                protobuf_planned_fields,
+                record.get("planned_fields"),
+            )
+            _counter_from_mapping(
                 protobuf_mutated_fields,
                 record.get("mutated_fields"),
+            )
+        elif event == "protobuf_response_mutation_rejected":
+            protobuf_mutation_rejections += 1
+            _counter_from_mapping(
+                protobuf_planned_fields,
+                record.get("planned_fields"),
             )
 
     return {
@@ -424,6 +436,13 @@ def summarize(lines: list[str]) -> dict[str, object]:
                 )
             ),
             "mutations": protobuf_mutations,
+            "mutation_rejections": protobuf_mutation_rejections,
+            "planned_field_hits": dict(
+                sorted(
+                    protobuf_planned_fields.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ),
             "mutated_field_hits": dict(
                 sorted(
                     protobuf_mutated_fields.items(),
