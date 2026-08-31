@@ -34,7 +34,7 @@ See `docs/HTTPS-OBSERVATION.md` for the diagnostic sequence.
 
 The real iPhone test demonstrated that HTTPS inspection is viable when QUIC is forced to fall back to TCP. A temporal ad/content comparison then showed that request paths are not a reliable blocker: `/videoplayback`, `/initplayback`, watch-time telemetry and ad-related endpoints can all appear across both windows.
 
-The experiment therefore moved one layer upstream to InnerTube protobuf responses. In discovery mode the proxy asks `youtubei.googleapis.com/youtubei/v1/*` for uncompressed responses, scans them in-flight for ad markers such as `/pagead/`, and records only aggregate marker counts plus plausible enclosing protobuf field numbers. Response bytes are not persisted and are forwarded unchanged.
+The experiment therefore moved one layer upstream to InnerTube protobuf responses. In discovery mode the proxy asks `youtubei.googleapis.com/youtubei/v1/*` for uncompressed responses, scans them in-flight for ad markers such as `/pagead/`, and records only aggregate marker counts plus the nearest plausible enclosing protobuf field and its distance. Response bytes are not persisted and are forwarded unchanged.
 
 Aggregate the minimized log with:
 
