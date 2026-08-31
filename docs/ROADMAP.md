@@ -65,6 +65,10 @@
 - [x] Legacy labeled DNS capture backend retained for diagnostics
 - [x] Test official YouTube iOS TLS interception
 - [x] Determine that app-wide certificate pinning does not prevent inspection
-- [x] Add aggregate comparison of ad-candidate and playback metadata
-- [x] Identify candidate request-level signals without blocking
-- [ ] Add blocking rules only after false-positive validation
+- [x] Compare ad and normal-content request metadata on a real iPhone
+- [x] Reject path-level ad/playback categories as unsafe blocking signals
+- [x] Add streaming InnerTube protobuf marker/field discovery
+- [x] Add protobuf field-denaturing mechanism behind disabled interlocks
+- [ ] Validate stable current-iOS candidate field numbers across repeated ad/no-ad captures
+- [ ] Run false-positive playback validation with an explicitly configured field list
+- [ ] Enable protobuf mutation only after validation succeeds
