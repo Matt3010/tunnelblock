@@ -95,7 +95,7 @@ Captured metadata can be summarized without exposing individual hosts, paths or 
 python3 scripts/analyze-youtube-observations.py
 ```
 
-The current one-shot filter follows the modern Onesie/UMP playback path entirely on the Raspberry. It keeps config keys only in RAM, verifies HMAC before decrypting, removes the schema-verified `adPlacements`/`adSlots` fields, recompresses and re-encrypts locally, and forwards the original response on any mismatch. No external Worker is used and persistent traffic logging is disabled for the filter session.
+The current one-shot filter follows the modern encrypted Onesie/UMP playback path entirely on the Raspberry. It keeps config keys only in RAM, verifies HMAC before decrypting, removes the schema-verified `adPlacements`/`adSlots` fields inside the authenticated UMP control pair, recompresses and re-encrypts locally, and forwards the original response on any mismatch. Ordinary `/player` responses are never altered. No external Worker is used and persistent traffic logging is disabled for the filter session.
 
 Use `sh scripts/youtube-ump-filter.sh enable`, then open YouTube normally. Restore the safe defaults with `sh scripts/youtube-ump-filter.sh disable` after the test.
 

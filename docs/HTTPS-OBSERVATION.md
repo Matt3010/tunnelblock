@@ -107,7 +107,9 @@ GetWatch contents.
 It reconstructs, recompresses, re-encrypts and signs locally. The original response
 is forwarded byte-for-byte on missing keys, HMAC failure, unsupported framing or
 compression, malformed protobuf, or zero applicable fields. Mutation is one-shot
-per proxy process and disabled in Compose.
+per proxy process, applies only to an authenticated encrypted UMP control pair,
+and is disabled in Compose. Ordinary `/player` responses remain byte-for-byte
+unchanged so the one-shot cannot split duplicated player state across transports.
 
 Protocol and schema references are pinned conceptually to Maasea `65075cdb`, the
 current [GoogleVideo UMP implementation](https://github.com/LuanRT/googlevideo),

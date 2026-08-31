@@ -16,7 +16,7 @@ from ump_diagnostics import (
     extract_onesie_keys,
     inspect_onesie_config,
 )
-from ump_filter import UmpStreamFilter, filter_player_response
+from ump_filter import UmpStreamFilter
 
 LOG_PATH = Path(
     os.environ.get(
@@ -367,15 +367,6 @@ def responseheaders(flow: http.HTTPFlow) -> None:
         return
 
     if (
-        UMP_FILTER_ENABLED
-        and path == "/youtubei/v1/player"
-        and _reserve_filter()
-    ):
-        flow.metadata["phase2_player_filter_buffered"] = True
-        response.stream = False
-        return
-
-    if (
         (UMP_DIAGNOSTICS_ENABLED or UMP_FILTER_ENABLED)
         and path in {"/youtubei/v1/config", "/youtubei/v1/log_event"}
     ):
@@ -413,14 +404,6 @@ def response(flow: http.HTTPFlow) -> None:
     stream_filter = flow.metadata.pop("phase2_ump_stream_filter", None)
     if stream_filter is not None:
         _finish_filter(stream_filter.changes > 0)
-        return
-
-    if flow.metadata.get("phase2_player_filter_buffered"):
-        original = flow.response.get_content(strict=False) or b""
-        filtered, changes = filter_player_response(original)
-        if changes > 0:
-            flow.response.set_content(filtered)
-        _finish_filter(changes > 0)
         return
 
     if not flow.metadata.get("phase2_protobuf_buffered"):
