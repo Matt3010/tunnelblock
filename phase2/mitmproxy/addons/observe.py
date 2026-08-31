@@ -15,6 +15,7 @@ from protobuf_scan import (
     neutralize_planned_nodes,
     planned_field_counts,
 )
+from decision_fingerprint import structural_fingerprint
 
 LOG_PATH = Path(
     os.environ.get(
@@ -40,6 +41,11 @@ PROTOBUF_BLOCKING_ENABLED = (
     in {"1", "true", "yes", "on"}
 )
 _lock = threading.Lock()
+DECISION_DIAGNOSTICS_ENABLED = (
+    os.environ.get("PROTOBUF_DECISION_DIAGNOSTICS_ENABLED", "false")
+    .strip().lower() in {"1", "true", "yes", "on"}
+)
+OBSERVATION_SESSION = os.environ.get("OBSERVATION_SESSION", "").strip()
 
 
 def _parse_target_fields(raw: str) -> tuple[int, ...]:
@@ -154,6 +160,7 @@ def _emit(event: str, **fields: object) -> None:
     record = {
         "ts": _now(),
         "event": event,
+        **({"session": OBSERVATION_SESSION} if OBSERVATION_SESSION else {}),
         **{key: value for key, value in fields.items() if value is not None},
     }
 
@@ -259,7 +266,10 @@ def responseheaders(flow: http.HTTPFlow) -> None:
         response.stream = True
         return
 
-    if PROTOBUF_BLOCKING_ENABLED and PROTOBUF_BLOCK_FIELD_TAGS:
+    if (
+        (PROTOBUF_BLOCKING_ENABLED and PROTOBUF_BLOCK_FIELD_TAGS)
+        or DECISION_DIAGNOSTICS_ENABLED
+    ):
         # Mutation is deliberately opt-in. Only this mode buffers matching
         # InnerTube protobuf responses; discovery mode stays fully streamed.
         # Configured field payloads are neutralized only when the same physical
@@ -296,6 +306,21 @@ def response(flow: http.HTTPFlow) -> None:
     scanner = ProtobufStreamScanner(backtrack_bytes=PROTOBUF_BACKTRACK_BYTES)
     scanner.feed(body)
     _emit_protobuf_scan(request.pretty_host, path, scanner)
+
+    if DECISION_DIAGNOSTICS_ENABLED and path in {
+        "/youtubei/v1/player",
+        "/youtubei/v1/next",
+    }:
+        _emit(
+            "protobuf_decision_fingerprint",
+            host=request.pretty_host,
+            path=path,
+            body_bytes=len(body),
+            fingerprint=structural_fingerprint(body),
+        )
+
+    if not (PROTOBUF_BLOCKING_ENABLED and PROTOBUF_BLOCK_FIELD_TAGS):
+        return
 
     planned_nodes = [
         candidate

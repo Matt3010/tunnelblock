@@ -91,6 +91,60 @@ Generate an aggregate report that does not reproduce individual hosts, paths or 
 python3 scripts/analyze-youtube-observations.py
 ```
 
+## Playback-decision fingerprint experiment
+
+The marker-bearing `field 14` experiment showed correlation but not control:
+renaming its tag and then neutralizing its complete payload both left ad playback
+unchanged with exact planned/applied counts. Treat that branch as descriptive ad
+metadata, not as evidence of the player decision.
+
+The next experiment is observation-only. When explicitly started, it buffers only
+protobuf `/youtubei/v1/player` and `/youtubei/v1/next` responses in memory, parses
+their schema-free wire structure, and records truncated SHA-256 fingerprints,
+field/wire counts, nested field paths, coarse size/scalar buckets and relative timing.
+Scalar values, strings, media IDs and response bodies are never recorded. The
+original response is forwarded byte-for-byte and mutation remains disabled.
+
+Start one labeled session:
+
+```bash
+sh scripts/youtube-decision-capture.sh start
+```
+
+Immediately before tapping a video expected to show an ad:
+
+```bash
+sh scripts/youtube-decision-capture.sh mark ad-video-selected
+```
+
+Mark the visible transitions as promptly as possible:
+
+```bash
+sh scripts/youtube-decision-capture.sh mark ad-start
+sh scripts/youtube-decision-capture.sh mark content-start
+sh scripts/youtube-decision-capture.sh mark second-ad-start
+```
+
+For a separate control video that starts directly with content, mark before the tap:
+
+```bash
+sh scripts/youtube-decision-capture.sh mark control-video-selected
+sh scripts/youtube-decision-capture.sh mark content-start
+```
+
+Finish and restore the safe network defaults, then generate the minimized report:
+
+```bash
+sh scripts/youtube-decision-capture.sh stop
+python3 scripts/analyze-youtube-decisions.py
+```
+
+The report selects the latest session, groups structural fingerprints by the most
+recent manual marker, and includes a millisecond-relative timeline. Differences
+that repeat before `ad-start` but not before control content are candidates for a
+later validation experiment; they are not automatically promoted to mutation
+targets.
+
 The report focuses on protobuf marker counts, marker-specific nearest fields/distances, ancestor-chain frequencies and shared physical ancestor candidates. Shared candidates are computed from tag/payload coordinates in memory and emitted only as aggregate field/depth/size metadata; absolute positions and payload bytes are not persisted. These values are dry-run evidence, not blocking decisions; repeated ad/no-ad validation is required before any structural target can be configured for mutation.
 
 `mitmdump` runs with `flow_detail=0`, so its normal request/response flow summaries are not written to Docker stdout. The JSONL file above is the canonical observation log; container logs are reserved for proxy/runtime failures.
