@@ -127,6 +127,8 @@ services:
       - --listen-port
       - "8080"
       - --set
+      - confdir=/home/mitmproxy/.mitmproxy
+      - --set
       - flow_detail=0
       - -s
       - /addons/observe.py

@@ -59,8 +59,7 @@ googleadservices.com
 Recorded fields can include:
 
 - timestamp;
-- TLS SNI and ALPN offered by the client;
-- negotiated TLS version, ALPN, cipher, transport and connection error metadata;
+- TLS SNI, transport, version, negotiated cipher/ALPN and coarse failure category;
 - HTTP host;
 - method;
 - URL path **without query string**, with long/token-like path segments redacted;
@@ -76,6 +75,10 @@ The addon does **not** persist:
 - query strings;
 - request bodies;
 - response bodies.
+
+Payloads are streamed through rather than buffered by the addon. Normal mitmdump flow
+output is disabled so Docker logs do not become a second, less-redacted traffic log.
+TLS failures are persisted only as coarse categories, never as raw library error strings.
 
 The metadata log rotates at approximately 25 MiB.
 

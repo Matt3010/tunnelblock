@@ -114,6 +114,9 @@ def _emit(event: str, **fields: object) -> None:
 
 def requestheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
+    # Stream payloads through unchanged so the observation addon never buffers
+    # complete request bodies in memory or writes them to persistent storage.
+    request.stream = True
     if not _matches_host(request.pretty_host):
         return
     _emit(
@@ -130,6 +133,9 @@ def requestheaders(flow: http.HTTPFlow) -> None:
 def responseheaders(flow: http.HTTPFlow) -> None:
     request = flow.request
     response = flow.response
+    if response is not None:
+        # The same guarantee applies to response bodies.
+        response.stream = True
     if not _matches_host(request.pretty_host):
         return
     _emit(
@@ -171,8 +177,20 @@ def _tls_metadata(data: tls.TlsData) -> dict[str, object]:
         "tls_version": getattr(conn, "tls_version", None),
         "alpn": _decode_alpn(getattr(conn, "alpn", None)),
         "cipher": getattr(conn, "cipher", None),
-        "error": getattr(conn, "error", None),
     }
+
+
+def _tls_error_category(data: tls.TlsData) -> str:
+    # Raw library error strings can contain endpoint details. Persist only a
+    # stable category that is sufficient for the pinning go/no-go test.
+    error = str(getattr(data.conn, "error", "") or "").lower()
+    if "unknown ca" in error or "bad certificate" in error or "certificate unknown" in error:
+        return "certificate_rejected"
+    if "closed" in error or "eof" in error:
+        return "connection_closed_during_handshake"
+    if "protocol" in error or "version" in error or "cipher" in error:
+        return "tls_negotiation_failure"
+    return "tls_handshake_failure"
 
 
 def tls_established_client(data: tls.TlsData) -> None:
@@ -190,14 +208,23 @@ def tls_established_server(data: tls.TlsData) -> None:
 def tls_failed_client(data: tls.TlsData) -> None:
     sni = _tls_sni(data)
     if _matches_host(sni):
-        _emit("tls_failed_client", sni=sni, **_tls_metadata(data))
+        _emit(
+            "tls_failed_client",
+            sni=sni,
+            error_category=_tls_error_category(data),
+            **_tls_metadata(data),
+        )
 
 
 def tls_failed_server(data: tls.TlsData) -> None:
     sni = _tls_sni(data)
     if _matches_host(sni):
-        _emit("tls_failed_server", sni=sni, **_tls_metadata(data))
-
+        _emit(
+            "tls_failed_server",
+            sni=sni,
+            error_category=_tls_error_category(data),
+            **_tls_metadata(data),
+        )
 
 if __name__ == "__main__":
     assert _safe_path("/watch?v=secret&token=hidden") == "/watch"
