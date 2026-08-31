@@ -40,6 +40,30 @@ type UpdateState = {
 };
 
 let launching = false;
+let lastAutomaticCheckAt: string | null = null;
+let lastAutomaticCheckError: string | null = null;
+
+function safeProcessError(error: unknown): {
+  code: string | number | null;
+  signal: string | null;
+  stderr: string;
+} {
+  const failure = error as {
+    code?: string | number;
+    signal?: string;
+    stderr?: string;
+  };
+
+  return {
+    code: failure?.code ?? null,
+    signal: failure?.signal ?? null,
+    stderr: typeof failure?.stderr === "string"
+      ? tail(failure.stderr, 2000)
+          .replace(/github_pat_[A-Za-z0-9_]+/g, "<redacted>")
+          .replace(/Authorization:\s*Basic\s+\S+/gi, "Authorization: Basic <redacted>")
+      : "",
+  };
+}
 
 function defaultState(): UpdateState {
   return {
@@ -141,14 +165,22 @@ async function fetchRemoteSha(): Promise<string> {
     "git",
     [
       "-c",
-      `http.extraHeader=Authorization: Basic ${auth}`,
+      `safe.directory=${repoDir}`,
       "-c",
       "credential.helper=",
       "ls-remote",
       "origin",
       `refs/heads/${branch}`,
     ],
-    { cwd: repoDir, env: process.env },
+    {
+      cwd: repoDir,
+      env: {
+        ...process.env,
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "http.extraHeader",
+        GIT_CONFIG_VALUE_0: `Authorization: Basic ${auth}`,
+      },
+    },
   );
 
   const sha = stdout.trim().split(/\s+/)[0];
@@ -160,7 +192,7 @@ async function fetchRemoteSha(): Promise<string> {
 }
 
 async function localSha(): Promise<string> {
-  const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+  const { stdout } = await execFileAsync("git", ["-c", `safe.directory=${repoDir}`, "rev-parse", "HEAD"], {
     cwd: repoDir,
     env: process.env,
   });
@@ -414,8 +446,10 @@ async function checkForUpdates(): Promise<void> {
   if (state.running) return;
 
   try {
+    lastAutomaticCheckAt = new Date().toISOString();
     const remote = await fetchRemoteSha();
     const local = await localSha();
+    lastAutomaticCheckError = null;
 
     if (remote === state.failedRemoteSha) {
       app.log.warn({ remote }, "skipping-previously-failed-revision");
@@ -435,7 +469,9 @@ async function checkForUpdates(): Promise<void> {
       });
     }
   } catch (error) {
-    app.log.error({ error }, "automatic-update-check-failed");
+    const safeError = safeProcessError(error);
+    lastAutomaticCheckError = safeError.stderr || `git check failed (${safeError.code ?? "unknown"})`;
+    app.log.error(safeError, "automatic-update-check-failed");
   }
 }
 
@@ -470,6 +506,8 @@ app.get("/status", async (request, reply) => {
     autoUpdate: true,
     githubAuthConfigured: Boolean(githubToken),
     pollIntervalSec,
+    lastAutomaticCheckAt,
+    lastAutomaticCheckError,
     statePersistent: true,
     runtimeGeneration,
     runtimeBuildSha,
