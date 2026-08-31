@@ -36,6 +36,10 @@ The real iPhone test demonstrated that HTTPS inspection is viable when QUIC is f
 
 The experiment therefore moved one layer upstream to InnerTube protobuf responses. In discovery mode the proxy asks `youtubei.googleapis.com/youtubei/v1/*` for uncompressed responses, scans them in-flight for ad markers such as `/pagead/`, and records only aggregate marker counts plus plausible enclosing protobuf field numbers. Response bytes are not persisted and are forwarded unchanged.
 
+A first real iPhone temporal capture strongly validated this direction: the ad window contained 18 `/pagead/` markers across three protobuf responses (about 200 KiB scanned), while a roughly 29-second normal-content window contained one 36-byte protobuf response and zero ad markers. This validates the marker as a useful ad-window discriminator, but not yet any specific protobuf field number.
+
+The scanner therefore ranks the nearest verified length-delimited field enclosing each marker and records distance statistics. Broader candidate lists remain diagnostic because nested protobuf messages and random schema-free byte patterns can produce multiple plausible ancestors.
+
 Aggregate the minimized log with:
 
 ```bash
