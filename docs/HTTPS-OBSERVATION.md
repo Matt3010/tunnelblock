@@ -285,7 +285,7 @@ sh scripts/quic.sh block
 sh scripts/quic.sh allow
 sh scripts/quic.sh status
 
-# one-shot structural protobuf mutation
+# one-shot protobuf payload neutralization
 sh scripts/protobuf-mutation.sh enable 14
 sh scripts/protobuf-mutation.sh status
 sh scripts/protobuf-mutation.sh disable
