@@ -84,6 +84,22 @@ It does **not** implement HTTPS/TLS interception, a private CA, transparent prox
 
 See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup, iPhone import and verification.
 
+## Phase 2 HTTPS observation lab
+
+The repository now also contains a diagnostic transparent-proxy lab for YouTube testing.
+
+It is designed to be safe by default:
+
+- `mitmproxy` runs with no host/router port exposure;
+- HTTPS interception is disabled until `scripts/https-intercept.sh enable` is run;
+- QUIC blocking is disabled until `scripts/quic.sh block` is run;
+- the private CA and logs persist only under ignored `data/mitmproxy/`;
+- only metadata for YouTube-related hosts is written;
+- headers, cookies, query strings and request/response bodies are not persisted;
+- no YouTube blocking rule is installed.
+
+See [docs/HTTPS-OBSERVATION.md](docs/HTTPS-OBSERVATION.md) for the go/no-go test and rollback commands.
+
 ## Deployment
 
 The updater watches `master`. A deployment runs the current `ops/deploy.sh`, which:
