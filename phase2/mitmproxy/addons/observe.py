@@ -33,19 +33,6 @@ def _safe_path(raw: str) -> str:
         return "/"
 
 
-def _server_address(data: tls.TlsData) -> str | None:
-    server = getattr(data.context, "server", None)
-    address = getattr(server, "address", None)
-    if not address:
-        return None
-
-    try:
-        host, port = address[0], address[1]
-        return f"{host}:{port}"
-    except (IndexError, TypeError):
-        return str(address)
-
-
 def _rotate_if_needed() -> None:
     if MAX_BYTES <= 0 or not LOG_PATH.exists():
         return
@@ -106,25 +93,18 @@ def responseheaders(flow: http.HTTPFlow) -> None:
     )
 
 
-def tls_established_client(data: tls.TlsData) -> None:
-    _emit(
-        "tls_client_established",
-        sni=getattr(data.conn, "sni", None),
-        server=_server_address(data),
-        tls_version=getattr(data.conn, "tls_version", None),
-    )
-
-
-def tls_failed_client(data: tls.TlsData) -> None:
-    error = getattr(data.conn, "error", None)
-    if error:
-        error = str(error)[:400]
+def tls_clienthello(data: tls.ClientHelloData) -> None:
+    alpn = []
+    for item in data.client_hello.alpn_protocols:
+        try:
+            alpn.append(item.decode("ascii", errors="replace"))
+        except AttributeError:
+            alpn.append(str(item))
 
     _emit(
-        "tls_client_failed",
-        sni=getattr(data.conn, "sni", None),
-        server=_server_address(data),
-        error=error,
+        "tls_clienthello",
+        sni=data.client_hello.sni,
+        alpn=alpn,
     )
 
 
