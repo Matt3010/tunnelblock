@@ -46,4 +46,4 @@ Aggregate the minimized log with:
 python3 scripts/analyze-youtube-observations.py
 ```
 
-A field-denaturing implementation is available for the later blocking experiment, but the checked-in configuration keeps `PROTOBUF_BLOCKING_ENABLED=false` and `PROTOBUF_BLOCK_FIELD_TAGS` empty. Historical field numbers are not trusted automatically; current iOS observations must validate them first.
+A field-denaturing implementation is available for the later blocking experiment, but it now uses structural matching: a configured field number is eligible only when the same physical protobuf node contains every configured ad marker type. This prevents a same-number leaf containing only `/pagead/` from being mutated accidentally. The checked-in configuration still keeps `PROTOBUF_BLOCKING_ENABLED=false` and `PROTOBUF_BLOCK_FIELD_TAGS` empty. Historical field numbers are not trusted automatically; current iOS observations must validate them first.
