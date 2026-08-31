@@ -155,6 +155,44 @@ class ObservationAnalysisTest(unittest.TestCase):
         )
         self.assertFalse(result["blocking_observed"])
 
+    def test_neutralization_is_reported_as_blocking(self):
+        result = MODULE.summarize(
+            [
+                '{"event":"protobuf_response_neutralization","neutralization_count":3,"planned_fields":{"14":3},"neutralized_fields":{"14":3}}'
+            ]
+        )
+        self.assertTrue(result["blocking_observed"])
+        self.assertEqual(result["protobuf"]["neutralizations"], 3)
+        self.assertEqual(
+            result["protobuf"]["neutralized_field_hits"]["14"],
+            3,
+        )
+        self.assertEqual(
+            result["protobuf"]["planned_field_hits"]["14"],
+            3,
+        )
+        self.assertEqual(
+            result["protobuf"]["neutralization_rejections"],
+            0,
+        )
+
+    def test_neutralization_rejection_is_reported(self):
+        result = MODULE.summarize(
+            [
+                '{"event":"protobuf_response_neutralization_rejected","reason":"planned_neutralized_mismatch","planned_fields":{"14":4},"neutralized_fields":{"14":3}}'
+            ]
+        )
+        self.assertFalse(result["blocking_observed"])
+        self.assertEqual(
+            result["protobuf"]["neutralization_rejections"],
+            1,
+        )
+        self.assertEqual(
+            result["protobuf"]["planned_field_hits"]["14"],
+            4,
+        )
+        self.assertEqual(result["protobuf"]["neutralizations"], 0)
+
     def test_invalid_json_is_counted(self):
         result = MODULE.summarize(["not-json", "[]"])
         self.assertEqual(result["invalid_lines"], 2)
