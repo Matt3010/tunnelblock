@@ -79,7 +79,7 @@ The addon does **not** persist:
 
 Request bodies and ordinary response bodies are streamed through rather than buffered by the addon. For `youtubei.googleapis.com/youtubei/v1/*`, the request is constrained to identity encoding and protobuf response bytes are scanned in-flight with a bounded tail buffer. The scanner looks for ad-related byte markers and plausible enclosing length-delimited field numbers, then forwards the original bytes unchanged. It never writes response payloads to disk.
 
-Active protobuf mutation is a separate opt-in path. It buffers only eligible InnerTube protobuf responses and denatures an explicitly configured, previously validated field number only when the same physical length-delimited node contains every configured ad marker type. Same-number leaf fields that contain only one marker are left untouched. The checked-in configuration has `PROTOBUF_BLOCKING_ENABLED=false` and an empty `PROTOBUF_BLOCK_FIELD_TAGS`, so discovery mode cannot mutate traffic.
+Active protobuf mutation is a separate opt-in path. It buffers only eligible InnerTube protobuf responses and denatures an explicitly configured, previously validated field number only when the same physical length-delimited node contains every configured ad marker type. Same-number leaf fields that contain only one marker are left untouched. Compose defaults remain `PROTOBUF_BLOCKING_ENABLED=false` with an empty field list; runtime overrides are accepted only for an explicit test session through `scripts/protobuf-mutation.sh`, so normal starts and updater deployments stay observation-only.
 
 Normal mitmdump flow output is disabled so Docker logs do not become a second, less-redacted traffic log. TLS failures are persisted only as coarse categories, never as raw library error strings.
 
@@ -284,6 +284,11 @@ sh scripts/https-intercept.sh status
 sh scripts/quic.sh block
 sh scripts/quic.sh allow
 sh scripts/quic.sh status
+
+# one-shot structural protobuf mutation
+sh scripts/protobuf-mutation.sh enable 14
+sh scripts/protobuf-mutation.sh status
+sh scripts/protobuf-mutation.sh disable
 
 # CA
 sh scripts/mitmproxy-ca.sh prepare

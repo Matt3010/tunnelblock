@@ -140,7 +140,7 @@ deploy_target() (
   docker compose --profile https-lab build mitmproxy >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: WireGuard/Phase-2 shell checks =="
-  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/phase2-firewall.sh scripts/wireguard-client.sh scripts/https-intercept.sh scripts/quic.sh scripts/phase2-status.sh scripts/mitmproxy-ca.sh >>"$LOG_FILE" 2>&1
+  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/phase2-firewall.sh scripts/wireguard-client.sh scripts/https-intercept.sh scripts/quic.sh scripts/phase2-status.sh scripts/protobuf-mutation.sh scripts/mitmproxy-ca.sh >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: Phase-2 Python checks =="
   python3 -B -m unittest \
