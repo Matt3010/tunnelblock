@@ -83,3 +83,46 @@ The iPhone peer receives a ULA address and `::/0` is present in `AllowedIPs`.
 This is intentional even on networks where the Raspberry cannot provide working IPv6 egress: IPv6 is captured by WireGuard instead of bypassing the VPN over the phone's carrier/Wi-Fi interface.
 
 The gateway attempts IPv6 forwarding/NAT through an IPv6-enabled Docker egress bridge. If the Raspberry/home ISP has no usable IPv6 egress, IPv6 Internet access can be unavailable while applications fall back to IPv4. A carrier/Wi-Fi IPv6 address visible while WireGuard is active is considered a leak and a failed Phase-1 verification.
+
+
+## Phase 2 HTTPS observation namespace
+
+The diagnostic `mitmproxy` service uses:
+
+```yaml
+network_mode: "service:wireguard"
+```
+
+so it shares the WireGuard network namespace without being attached to the normal application network and without publishing a host port.
+
+Normal state:
+
+```text
+iPhone TCP/443 -> WireGuard FORWARD -> Internet
+```
+
+Observation state:
+
+```text
+iPhone TCP/443
+  -> PREROUTING REDIRECT in the WireGuard namespace
+  -> local :8080
+  -> mitmproxy transparent mode
+  -> Internet
+```
+
+The redirect rule is not created by container startup. It exists only after the explicit Phase-2 enable command and disappears on disable or WireGuard recreation.
+
+QUIC remains independent. UDP/443 is allowed by default and can be temporarily rejected to force a TCP fallback during the go/no-go test.
+
+IPv6 TCP/443 is temporarily rejected while interception is enabled rather than being allowed to bypass the IPv4 transparent proxy.
+
+The proxy's persistent runtime directory is:
+
+```text
+data/mitmproxy/
+```
+
+It contains the private CA and minimized observation metadata and is covered by the repository's existing `data/` ignore rule.
+
+No mitmproxy endpoint or CA material is exposed through Caddy/Cloudflare.
