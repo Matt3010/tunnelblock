@@ -46,6 +46,18 @@ class ProtobufScanTest(unittest.TestCase):
         self.assertEqual(fields[0][0], inner)
         self.assertIn((outer, marker_pos), fields)
 
+    def test_truncated_random_candidate_is_rejected(self):
+        target = 50195462
+        body = self._field(target, b"prefix-/pagead/-suffix")
+        marker_pos = body.index(b"/pagead/")
+
+        fields = MODULE.enclosing_length_delimited_fields(
+            body, marker_pos, len(b"/pagead/"), 1024
+        )
+
+        self.assertEqual(fields[0][0], target)
+        self.assertNotIn(14, [field for field, _distance in fields])
+
     def test_denature_is_inert_without_validated_targets(self):
         body = self._field(50195462, b"abc/pagead/def")
         mutated, changes = MODULE.denature_ad_fields(body, [])
