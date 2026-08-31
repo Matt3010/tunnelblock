@@ -104,37 +104,21 @@ Onesie key presence and sizes, while `googlevideo.com/initplayback` UMP response
 remain streamed. Only counts, sizes, content type and relative timing are recorded.
 Keys, query values and encrypted response bytes are never persisted.
 
-Start one labeled session:
+Start the low-latency interactive session:
 
 ```bash
-sh scripts/youtube-ump-capture.sh start
+sh scripts/youtube-ump-capture.sh run
 ```
 
-Immediately before tapping a video expected to show an ad:
+Keep this terminal open. Each prompt advances with a single `Enter` and writes the
+timestamp from the already-running process inside the observer container. The
+sequence covers video selection, visible ad start, content start, optional second
+ad, and a control video. Enter `s` only when prompted if no second ad appears.
+
+The interactive command restores the safe network defaults when it finishes or is
+interrupted. Then generate the minimized report:
 
 ```bash
-sh scripts/youtube-ump-capture.sh mark ad-video-selected
-```
-
-Mark the visible transitions as promptly as possible:
-
-```bash
-sh scripts/youtube-ump-capture.sh mark ad-start
-sh scripts/youtube-ump-capture.sh mark content-start
-sh scripts/youtube-ump-capture.sh mark second-ad-start
-```
-
-For a separate control video that starts directly with content, mark before the tap:
-
-```bash
-sh scripts/youtube-ump-capture.sh mark control-video-selected
-sh scripts/youtube-ump-capture.sh mark content-start
-```
-
-Finish and restore the safe network defaults, then generate the minimized report:
-
-```bash
-sh scripts/youtube-ump-capture.sh stop
 python3 scripts/analyze-youtube-ump.py
 ```
 
@@ -337,8 +321,7 @@ sh scripts/quic.sh allow
 sh scripts/quic.sh status
 
 # observation-only Onesie/UMP session
-sh scripts/youtube-ump-capture.sh start
-sh scripts/youtube-ump-capture.sh stop
+sh scripts/youtube-ump-capture.sh run
 
 # CA
 sh scripts/mitmproxy-ca.sh prepare
