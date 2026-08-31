@@ -56,6 +56,14 @@ def _safe_path(raw: str) -> str:
         return "/"
 
 
+def _decode_alpn(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("ascii", errors="replace")
+    return str(value)
+
+
 def _rotate_if_needed() -> None:
     if MAX_BYTES <= 0 or not LOG_PATH.exists():
         return
@@ -124,19 +132,13 @@ def tls_clienthello(data: tls.ClientHelloData) -> None:
     if not _matches_host(data.client_hello.sni):
         return
 
-    alpn = []
-    for item in data.client_hello.alpn_protocols:
-        try:
-            alpn.append(item.decode("ascii", errors="replace"))
-        except AttributeError:
-            alpn.append(str(item))
+    alpn = [_decode_alpn(item) for item in data.client_hello.alpn_protocols]
 
     _emit(
         "tls_clienthello",
         sni=data.client_hello.sni,
-        alpn=alpn,
+        alpn=[item for item in alpn if item is not None],
     )
-
 
 
 def _tls_sni(data: tls.TlsData) -> str | None:
@@ -148,25 +150,44 @@ def _tls_sni(data: tls.TlsData) -> str | None:
     return getattr(server, "sni", None)
 
 
+def _tls_metadata(data: tls.TlsData) -> dict[str, object]:
+    conn = data.conn
+    return {
+        "transport": getattr(conn, "transport_protocol", None),
+        "tls_version": getattr(conn, "tls_version", None),
+        "alpn": _decode_alpn(getattr(conn, "alpn", None)),
+        "cipher": getattr(conn, "cipher", None),
+        "error": getattr(conn, "error", None),
+    }
+
+
 def tls_established_client(data: tls.TlsData) -> None:
     sni = _tls_sni(data)
     if _matches_host(sni):
-        _emit("tls_established_client", sni=sni)
+        _emit("tls_established_client", sni=sni, **_tls_metadata(data))
+
+
+def tls_established_server(data: tls.TlsData) -> None:
+    sni = _tls_sni(data)
+    if _matches_host(sni):
+        _emit("tls_established_server", sni=sni, **_tls_metadata(data))
 
 
 def tls_failed_client(data: tls.TlsData) -> None:
     sni = _tls_sni(data)
     if _matches_host(sni):
-        _emit("tls_failed_client", sni=sni)
+        _emit("tls_failed_client", sni=sni, **_tls_metadata(data))
 
 
 def tls_failed_server(data: tls.TlsData) -> None:
     sni = _tls_sni(data)
     if _matches_host(sni):
-        _emit("tls_failed_server", sni=sni)
+        _emit("tls_failed_server", sni=sni, **_tls_metadata(data))
+
 
 if __name__ == "__main__":
     assert _safe_path("/watch?v=secret&token=hidden") == "/watch"
     assert _safe_path("https://example.test/a/b?q=private") == "/a/b"
     assert _matches_host("youtubei.googleapis.com")
     assert not _matches_host("example.test")
+    assert _decode_alpn(b"h2") == "h2"
