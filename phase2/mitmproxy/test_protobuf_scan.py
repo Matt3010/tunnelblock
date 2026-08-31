@@ -220,6 +220,57 @@ class ProtobufScanTest(unittest.TestCase):
         self.assertIn(b"/pagead/", mutated)
         self.assertIn(b"googleadservices.com", mutated)
 
+    def test_diagnostic_plan_and_mutation_use_identical_nodes(self):
+        page_leaf = self._field(14, b"x/pagead/y")
+        google_leaf = self._field(
+            7,
+            b"xgoogleadservices.comy",
+        )
+        shared_payload = page_leaf + google_leaf
+        shared_parent = self._field(14, shared_payload)
+        unrelated = self._field(14, b"only/pagead/here")
+        body = unrelated + self._field(214, shared_parent)
+
+        scanner = MODULE.ProtobufStreamScanner(backtrack_bytes=1024)
+        scanner.feed(body)
+        diagnostic_nodes = [
+            candidate
+            for candidate, _marker_hits, _depths
+            in scanner.shared_nodes([14])
+        ]
+        compatibility_nodes = MODULE.shared_marker_field_nodes(
+            body,
+            [14],
+            backtrack_bytes=1024,
+        )
+
+        self.assertEqual(diagnostic_nodes, compatibility_nodes)
+        planned = MODULE.planned_field_counts(diagnostic_nodes)
+        mutated, changes = MODULE.denature_planned_nodes(
+            body,
+            diagnostic_nodes,
+        )
+        self.assertEqual(planned, {14: 1})
+        self.assertEqual(changes, planned)
+        self.assertNotEqual(mutated, body)
+
+    def test_denature_planned_nodes_exposes_plan_mismatch(self):
+        body = self._field(
+            14,
+            b"x/pagead/xgoogleadservices.comy",
+        )
+        bad_node = (14, 0, len(body) + 10, 0, len(body))
+
+        planned = MODULE.planned_field_counts([bad_node])
+        mutated, changes = MODULE.denature_planned_nodes(
+            body,
+            [bad_node],
+        )
+
+        self.assertEqual(planned, {14: 1})
+        self.assertEqual(changes, {})
+        self.assertEqual(mutated, body)
+
     def test_shared_structural_denature_requires_both_marker_types(self):
         body = self._field(14, b"only/pagead/here")
 
