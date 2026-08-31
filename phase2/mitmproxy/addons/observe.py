@@ -138,6 +138,33 @@ def tls_clienthello(data: tls.ClientHelloData) -> None:
     )
 
 
+
+def _tls_sni(data: tls.TlsData) -> str | None:
+    direct = getattr(data.conn, "sni", None)
+    if direct:
+        return direct
+
+    server = getattr(data.context, "server", None)
+    return getattr(server, "sni", None)
+
+
+def tls_established_client(data: tls.TlsData) -> None:
+    sni = _tls_sni(data)
+    if _matches_host(sni):
+        _emit("tls_established_client", sni=sni)
+
+
+def tls_failed_client(data: tls.TlsData) -> None:
+    sni = _tls_sni(data)
+    if _matches_host(sni):
+        _emit("tls_failed_client", sni=sni)
+
+
+def tls_failed_server(data: tls.TlsData) -> None:
+    sni = _tls_sni(data)
+    if _matches_host(sni):
+        _emit("tls_failed_server", sni=sni)
+
 if __name__ == "__main__":
     assert _safe_path("/watch?v=secret&token=hidden") == "/watch"
     assert _safe_path("https://example.test/a/b?q=private") == "/a/b"
