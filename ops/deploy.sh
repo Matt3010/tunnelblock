@@ -114,9 +114,11 @@ deploy_target() (
   log "== Deploy $TARGET_SHA =="
   log "== Pre-flight: docker compose config =="
   docker compose config --quiet >>"$LOG_FILE" 2>&1
+  docker compose --profile https-lab config --quiet >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: build complete stack =="
   docker compose build >>"$LOG_FILE" 2>&1
+  docker compose --profile https-lab build mitmproxy >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: WireGuard/Phase-2 shell checks =="
   sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/phase2-firewall.sh scripts/wireguard-client.sh scripts/https-intercept.sh scripts/quic.sh scripts/phase2-status.sh scripts/mitmproxy-ca.sh >>"$LOG_FILE" 2>&1
@@ -131,7 +133,9 @@ deploy_target() (
 
   log "== Pre-flight passed =="
   log "== Ensure Phase-2 lab is off =="
-  docker compose --profile https-lab stop mitmproxy >>"$LOG_FILE" 2>&1 || true
+  docker compose exec -T wireguard /app/phase2-firewall.sh https disable >>"$LOG_FILE" 2>&1 || true
+  docker compose exec -T wireguard /app/phase2-firewall.sh quic allow >>"$LOG_FILE" 2>&1 || true
+  docker compose --profile https-lab rm -f -s mitmproxy >>"$LOG_FILE" 2>&1 || true
 
   log "== Recreate complete stack =="
   docker compose up -d --force-recreate --remove-orphans >>"$LOG_FILE" 2>&1
