@@ -42,8 +42,17 @@ case "$ACTION" in
         | sed -n '/^YOUTUBE_UMP_FILTER_ENABLED=/p;/^OBSERVATION_LOG_ENABLED=/p'
     fi
     ;;
+  result)
+    CID="$(container_id)"
+    if [ -z "$CID" ]; then
+      echo "disabled"
+    else
+      docker compose --profile https-lab exec -T mitmproxy \
+        sh -c 'test -f /tmp/youtube-preroll-result && cat /tmp/youtube-preroll-result || echo unavailable'
+    fi
+    ;;
   *)
-    echo "Usage: $0 {enable|disable|status}" >&2
+    echo "Usage: $0 {enable|disable|status|result}" >&2
     exit 2
     ;;
 esac

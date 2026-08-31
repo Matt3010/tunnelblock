@@ -97,7 +97,7 @@ python3 scripts/analyze-youtube-observations.py
 
 The current one-shot experiment follows the modern encrypted Onesie/UMP playback path entirely on the Raspberry. It keeps config keys only in RAM, verifies that an `initplayback` request belongs to the active config, and changes only the public-schema `InnertubeRequest.enable_ad_placements_preroll` boolean from true to false. Request size must remain unchanged and planned/applied counts must match; otherwise the original request is forwarded. Responses are never altered. No external Worker is used and persistent traffic logging is disabled for the test session.
 
-Use `sh scripts/youtube-ump-filter.sh enable`, then open YouTube normally. Restore the safe defaults with `sh scripts/youtube-ump-filter.sh disable` after the test.
+Use `sh scripts/youtube-ump-filter.sh enable`, then open YouTube normally. Read the privacy-minimized outcome with `sh scripts/youtube-ump-filter.sh result`; it exposes only the mutation state and does not persist traffic metadata. Restore the safe defaults with `sh scripts/youtube-ump-filter.sh disable` after the test.
 
 ## Deployment
 

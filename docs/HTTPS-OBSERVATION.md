@@ -124,6 +124,10 @@ sh scripts/youtube-ump-filter.sh enable
 
 No markers or report are required. Fully close and reopen YouTube, then play a
 video normally. Persistent observation logging is disabled for this session. After
+the attempt, read the bounded in-container result with
+`sh scripts/youtube-ump-filter.sh result`. It returns only `pending`, `applied`,
+`absent`, `already_false`, `rejected`, `unavailable`, or `disabled`; no traffic
+metadata is stored. After
 the test, restore interception off and QUIC allowed:
 
 ```bash

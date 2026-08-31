@@ -28,9 +28,10 @@ class UmpFilterTest(unittest.TestCase):
         inner = ld(2, b"encrypted") + ld(5, b"key") + vi(13, 1) + vi(14, 1)
         request = ld(1, b"url") + ld(3, inner) + ld(4, b"config")
 
-        filtered, changes = MODULE.disable_preroll_request(request)
+        filtered, changes, result = MODULE.disable_preroll_request(request)
 
         self.assertEqual(changes, 1)
+        self.assertEqual(result, "applied")
         self.assertEqual(len(filtered), len(request))
         parsed_inner = next(
             field.value for field in MODULE._proto_fields(filtered)
@@ -44,21 +45,32 @@ class UmpFilterTest(unittest.TestCase):
     def test_absent_or_already_false_is_unchanged(self):
         for inner in (ld(2, b"encrypted"), vi(13, 0)):
             request = ld(3, inner)
-            self.assertEqual(MODULE.disable_preroll_request(request), (request, 0))
+            expected = "absent" if inner != vi(13, 0) else "already_false"
+            self.assertEqual(
+                MODULE.disable_preroll_request(request),
+                (request, 0, expected),
+            )
 
     def test_wrong_wire_or_non_boolean_fails_closed(self):
         for inner in (ld(13, b"true"), vi(13, 2)):
             request = ld(3, inner)
-            self.assertEqual(MODULE.disable_preroll_request(request), (request, 0))
+            self.assertEqual(
+                MODULE.disable_preroll_request(request),
+                (request, 0, "rejected"),
+            )
 
     def test_malformed_request_fails_closed(self):
         request = b"\x1a\x05bad"
-        self.assertEqual(MODULE.disable_preroll_request(request), (request, 0))
+        self.assertEqual(
+            MODULE.disable_preroll_request(request),
+            (request, 0, "rejected"),
+        )
 
     def test_all_duplicate_true_flags_are_planned_and_applied(self):
         request = ld(3, vi(13, 1) + vi(13, 1))
-        filtered, changes = MODULE.disable_preroll_request(request)
+        filtered, changes, result = MODULE.disable_preroll_request(request)
         self.assertEqual(changes, 2)
+        self.assertEqual(result, "applied")
         self.assertEqual(len(filtered), len(request))
 
 

@@ -24,6 +24,9 @@ LOG_PATH = Path(
         "/home/mitmproxy/.mitmproxy/observations/metadata.jsonl",
     )
 )
+UMP_RESULT_PATH = Path(
+    os.environ.get("YOUTUBE_UMP_RESULT", "/tmp/youtube-preroll-result")
+)
 MAX_BYTES = int(os.environ.get("OBSERVATION_MAX_BYTES", str(25 * 1024 * 1024)))
 HOST_SUFFIXES = tuple(
     item.strip().lower().lstrip(".")
@@ -55,6 +58,19 @@ _client_key: bytes | None = None
 _encrypted_key: bytes | None = None
 _filter_spent = False
 _filter_reserved = False
+
+
+def _set_filter_result(result: str) -> None:
+    if result not in {"pending", "applied", "absent", "already_false", "rejected"}:
+        result = "rejected"
+    try:
+        UMP_RESULT_PATH.write_text(result + "\n", encoding="ascii")
+    except OSError:
+        pass
+
+
+if UMP_FILTER_ENABLED:
+    _set_filter_result("pending")
 
 
 def _now() -> str:
@@ -281,7 +297,8 @@ def request(flow: http.HTTPFlow) -> None:
         return
     if not _reserve_filter():
         return
-    filtered, changes = disable_preroll_request(body)
+    filtered, changes, result = disable_preroll_request(body)
+    _set_filter_result(result)
     if changes:
         flow.request.set_content(filtered)
         _finish_filter(True)

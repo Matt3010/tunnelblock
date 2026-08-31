@@ -75,10 +75,11 @@ def _length_field(number: int, value: bytes) -> bytes:
     )
 
 
-def _disable_preroll(inner: bytes) -> tuple[bytes, int, int]:
+def _disable_preroll(inner: bytes) -> tuple[bytes, int, int, int]:
     output = bytearray()
     planned = 0
     applied = 0
+    already_false = 0
     for field in _proto_fields(inner):
         if field.number != 13:
             output.extend(field.raw)
@@ -99,29 +100,41 @@ def _disable_preroll(inner: bytes) -> tuple[bytes, int, int]:
             applied += 1
         else:
             output.extend(field.raw)
-    return bytes(output), planned, applied
+            already_false += 1
+    return bytes(output), planned, applied, already_false
 
 
-def disable_preroll_request(data: bytes) -> tuple[bytes, int]:
+def disable_preroll_request(data: bytes) -> tuple[bytes, int, str]:
     """Set public-schema InnertubeRequest.enable_ad_placements_preroll false."""
     try:
         output = bytearray()
         planned = 0
         applied = 0
+        already_false = 0
+        innertube_requests = 0
         for field in _proto_fields(data):
             if field.number != 3:
                 output.extend(field.raw)
                 continue
             if field.wire != 2 or not isinstance(field.value, bytes):
                 raise ValueError("InnertubeRequest has unexpected wire type")
-            inner, inner_planned, inner_applied = _disable_preroll(field.value)
+            innertube_requests += 1
+            inner, inner_planned, inner_applied, inner_false = _disable_preroll(
+                field.value
+            )
             output.extend(_length_field(field.number, inner))
             planned += inner_planned
             applied += inner_applied
+            already_false += inner_false
         rebuilt = bytes(output)
-        if planned == 0 or planned != applied or len(rebuilt) != len(data):
-            return data, 0
+        if planned != applied or len(rebuilt) != len(data):
+            return data, 0, "rejected"
+        if planned == 0:
+            result = "already_false" if already_false else "absent"
+            return data, 0, result
         _proto_fields(rebuilt)
-        return rebuilt, applied
+        if innertube_requests == 0:
+            return data, 0, "rejected"
+        return rebuilt, applied, "applied"
     except ValueError:
-        return data, 0
+        return data, 0, "rejected"
