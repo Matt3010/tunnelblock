@@ -95,6 +95,9 @@ verify_stack() {
   wait_service doh-proxy running || return 1
   wait_service telegram-bot running || return 1
   wait_service wireguard healthy || return 1
+  if docker compose config --services | grep -qx mitmproxy; then
+    wait_service mitmproxy healthy || return 1
+  fi
 
   for i in $(seq 1 30); do
     if verify_updater_revision "$EXPECTED_SHA"; then
@@ -118,8 +121,8 @@ deploy_target() (
   log "== Pre-flight: build complete stack =="
   docker compose build >>"$LOG_FILE" 2>&1
 
-  log "== Pre-flight: WireGuard shell checks =="
-  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh scripts/wireguard-client.sh >>"$LOG_FILE" 2>&1
+  log "== Pre-flight: WireGuard/Phase-2 shell checks =="
+  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/phase2-firewall.sh scripts/wireguard-client.sh scripts/https-intercept.sh scripts/quic.sh scripts/phase2-status.sh scripts/mitmproxy-ca.sh >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: DNS tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1
@@ -153,6 +156,9 @@ rollback_previous() (
   wait_service updater healthy
   wait_service doh-proxy running
   wait_service telegram-bot running
+  if docker compose config --services | grep -qx mitmproxy; then
+    wait_service mitmproxy healthy
+  fi
   verify_updater_revision "$PREVIOUS_SHA"
 )
 
