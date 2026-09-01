@@ -4,12 +4,9 @@ set -eu
 umask 077
 
 CONFIG_DIR="${WG_CONFIG_DIR:-/config}"
-CLIENT_NAME="${WG_CLIENT_NAME:-iphone}"
 SERVER_PORT="${WG_SERVER_PORT:-51820}"
 SERVER_IPV4_ADDRESS="${WG_SERVER_IPV4_ADDRESS:-10.66.66.1/24}"
 SERVER_IPV6_ADDRESS="${WG_SERVER_IPV6_ADDRESS:-fd42:66:66::1/64}"
-CLIENT_IPV4_ADDRESS="${WG_CLIENT_IPV4_ADDRESS:-10.66.66.2/32}"
-CLIENT_IPV6_ADDRESS="${WG_CLIENT_IPV6_ADDRESS:-fd42:66:66::2/128}"
 IPV4_SUBNET="${WG_IPV4_SUBNET:-10.66.66.0/24}"
 IPV6_SUBNET="${WG_IPV6_SUBNET:-fd42:66:66::/64}"
 ALLOWED_IPS="${WG_ALLOWED_IPS:-0.0.0.0/0, ::/0}"
@@ -17,24 +14,12 @@ DNS_SERVERS="${WG_DNS_SERVERS:-10.66.66.1}"
 DNS_UPSTREAMS="${WG_DNS_UPSTREAMS:-doh-a,doh-b}"
 MTU="${WG_MTU:-1420}"
 
-case "$CLIENT_NAME" in
-  ""|*[!A-Za-z0-9_-]*)
-    echo "Invalid WG_CLIENT_NAME" >&2
-    exit 2
-    ;;
-esac
-
-mkdir -p "$CONFIG_DIR/peers/$CLIENT_NAME"
-chmod 0700 "$CONFIG_DIR" "$CONFIG_DIR/peers" "$CONFIG_DIR/peers/$CLIENT_NAME"
+mkdir -p "$CONFIG_DIR/peers"
+chmod 0700 "$CONFIG_DIR" "$CONFIG_DIR/peers"
 
 SERVER_PRIVATE="$CONFIG_DIR/server_private.key"
 SERVER_PUBLIC="$CONFIG_DIR/server_public.key"
-CLIENT_PRIVATE="$CONFIG_DIR/peers/$CLIENT_NAME/private.key"
-CLIENT_PUBLIC="$CONFIG_DIR/peers/$CLIENT_NAME/public.key"
-PRESHARED_KEY="$CONFIG_DIR/peers/$CLIENT_NAME/preshared.key"
 SERVER_CONF="$CONFIG_DIR/wg0.conf"
-CLIENT_CONF="$CONFIG_DIR/peers/$CLIENT_NAME/$CLIENT_NAME.conf"
-CLIENT_QR="$CONFIG_DIR/peers/$CLIENT_NAME/$CLIENT_NAME.png"
 
 generate_keypair() {
   PRIVATE_FILE="$1"
@@ -51,12 +36,6 @@ generate_keypair() {
 }
 
 generate_keypair "$SERVER_PRIVATE" "$SERVER_PUBLIC"
-generate_keypair "$CLIENT_PRIVATE" "$CLIENT_PUBLIC"
-
-if [ ! -s "$PRESHARED_KEY" ]; then
-  wg genpsk >"$PRESHARED_KEY"
-fi
-chmod 0600 "$PRESHARED_KEY"
 
 resolve_public_ipv4() {
   for URL in "https://api.ipify.org" "https://icanhazip.com"; do
@@ -88,37 +67,36 @@ case "$ENDPOINT_HOST" in
     FORMATTED_ENDPOINT="$ENDPOINT_HOST"
     ;;
 esac
+printf '%s\n' "$FORMATTED_ENDPOINT" >"$CONFIG_DIR/endpoint"
+
+# Revoke the former single-client layout without destroying its key material.
+for LEGACY_DIR in "$CONFIG_DIR"/peers/*; do
+  [ -d "$LEGACY_DIR" ] || continue
+  if [ ! -s "$LEGACY_DIR/ipv4" ] || [ ! -s "$LEGACY_DIR/ipv6" ]; then
+    LEGACY_NAME="$(basename "$LEGACY_DIR")"
+    mv "$LEGACY_DIR" "$CONFIG_DIR/revoked-legacy-$LEGACY_NAME"
+  fi
+done
 
 cat >"$SERVER_CONF" <<EOF
 [Interface]
 PrivateKey = $(cat "$SERVER_PRIVATE")
 ListenPort = $SERVER_PORT
+EOF
+
+for PEER_DIR in "$CONFIG_DIR"/peers/*; do
+  [ -d "$PEER_DIR" ] || continue
+  [ -f "$PEER_DIR/enabled" ] || continue
+  [ -s "$PEER_DIR/public.key" ] || continue
+  cat >>"$SERVER_CONF" <<EOF
 
 [Peer]
-PublicKey = $(cat "$CLIENT_PUBLIC")
-PresharedKey = $(cat "$PRESHARED_KEY")
-AllowedIPs = $CLIENT_IPV4_ADDRESS, $CLIENT_IPV6_ADDRESS
+PublicKey = $(cat "$PEER_DIR/public.key")
+PresharedKey = $(cat "$PEER_DIR/preshared.key")
+AllowedIPs = $(cat "$PEER_DIR/ipv4")/32, $(cat "$PEER_DIR/ipv6")/128
 EOF
+done
 chmod 0600 "$SERVER_CONF"
-
-cat >"$CLIENT_CONF" <<EOF
-[Interface]
-PrivateKey = $(cat "$CLIENT_PRIVATE")
-Address = $CLIENT_IPV4_ADDRESS, $CLIENT_IPV6_ADDRESS
-DNS = $DNS_SERVERS
-MTU = $MTU
-
-[Peer]
-PublicKey = $(cat "$SERVER_PUBLIC")
-PresharedKey = $(cat "$PRESHARED_KEY")
-Endpoint = $FORMATTED_ENDPOINT:$SERVER_PORT
-AllowedIPs = $ALLOWED_IPS
-PersistentKeepalive = 25
-EOF
-chmod 0600 "$CLIENT_CONF"
-
-qrencode -o "$CLIENT_QR" -t PNG <"$CLIENT_CONF"
-chmod 0600 "$CLIENT_QR"
 
 ip link del wg0 2>/dev/null || true
 if ! ip link add dev wg0 type wireguard 2>/dev/null; then
@@ -242,7 +220,7 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-echo "WireGuard ready on UDP $SERVER_PORT; client material persisted under /config/peers/$CLIENT_NAME."
+echo "WireGuard ready on UDP $SERVER_PORT; peers are managed through Telegram."
 dnsmasq --keep-in-foreground --conf-file="$DNSMASQ_CONF" &
 DNSMASQ_PID="$!"
 wait "$DNSMASQ_PID"

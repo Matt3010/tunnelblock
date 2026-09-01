@@ -200,6 +200,17 @@ async function localSha(): Promise<string> {
   return stdout.trim();
 }
 
+function validPeerName(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(value);
+}
+
+async function wireguardPeerCommand(action: string, name?: string): Promise<string> {
+  const args = ["compose", "exec", "-T", "wireguard", "/app/peer-manager.sh", action];
+  if (name) args.push(name);
+  const { stdout } = await execFileAsync("docker", args, { cwd: repoDir, env: process.env });
+  return stdout;
+}
+
 async function serviceRuntimeState(service: string): Promise<string> {
   try {
     const { stdout: idOutput } = await execFileAsync(
@@ -555,6 +566,41 @@ app.post("/update", async (request, reply) => {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+});
+
+app.get("/vpn/peers", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+  return JSON.parse(await wireguardPeerCommand("list"));
+});
+
+app.post("/vpn/peers", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+  const name = (request.body as { name?: unknown } | null)?.name;
+  if (!validPeerName(name)) return reply.code(400).send({ error: "invalid peer name" });
+  return JSON.parse(await wireguardPeerCommand("add", name));
+});
+
+app.post("/vpn/peers/:name/:action", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+  const { name, action } = request.params as { name: string; action: string };
+  if (!validPeerName(name) || !["enable", "disable", "rotate"].includes(action)) {
+    return reply.code(400).send({ error: "invalid peer operation" });
+  }
+  return JSON.parse(await wireguardPeerCommand(action, name));
+});
+
+app.delete("/vpn/peers/:name", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+  const { name } = request.params as { name: string };
+  if (!validPeerName(name)) return reply.code(400).send({ error: "invalid peer name" });
+  return JSON.parse(await wireguardPeerCommand("delete", name));
+});
+
+app.get("/vpn/peers/:name/config", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+  const { name } = request.params as { name: string };
+  if (!validPeerName(name)) return reply.code(400).send({ error: "invalid peer name" });
+  return { name, config: await wireguardPeerCommand("conf", name) };
 });
 
 await app.listen({

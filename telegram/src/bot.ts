@@ -96,6 +96,7 @@ await bot.setMyCommands([
   { command: "diag", description: "Diagnostica resolver e storage" },
   { command: "domains", description: "Gestisci domini Allow / Block" },
   { command: "lists", description: "Gestisci blocklist esterne" },
+  { command: "vpn", description: "Gestisci utenti VPN" },
   { command: "topblocked", description: "Domini più bloccati" },
   { command: "topallowed", description: "Domini più richiesti" },
   { command: "update", description: "Aggiorna AdBlock" },
@@ -282,6 +283,22 @@ async function findDomainOnPage(key: string, page: number) {
 
 
 const pendingListAdd = new Map<number, number>();
+const pendingPeerAdd = new Map<number, number>();
+
+async function vpnView() {
+  const peers = await updaterApi("/vpn/peers");
+  const rows = peers.map((peer: any) => ([{
+    text: `${peer.enabled ? "✅" : "⏸"} ${peer.name} · ${peer.ipv4}`,
+    callback_data: `vpn:d:${peer.name}`,
+  }]));
+  rows.push([{ text: "➕ Nuovo utente", callback_data: "vpn:add" }]);
+  return { text: `👥 Utenti VPN\n${peers.length} configurati`, reply_markup: { inline_keyboard: rows } };
+}
+
+async function editVpnHome(chatId: number, messageId: number) {
+  const view = await vpnView();
+  await bot.editMessageText(view.text, { chat_id: chatId, message_id: messageId, reply_markup: view.reply_markup });
+}
 
 function shortListName(urlValue: string): string {
   try {
@@ -409,6 +426,7 @@ function helpText(): string {
     "/diag",
     "/domains",
     "/lists",
+    "/vpn",
     "/topblocked",
     "/topallowed",
     "/reload",
@@ -431,6 +449,20 @@ bot.on("callback_query", async query => {
   }
 
   try {
+    if (data === "vpn:home") { pendingPeerAdd.delete(chatId); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id); return; }
+    if (data === "vpn:add") { pendingPeerAdd.set(chatId, messageId); await bot.editMessageText("➕ Nuovo utente VPN\n\nInvia un nome (lettere, numeri, _ o -).", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: "❌ Annulla", callback_data: "vpn:home" }]] } }); await bot.answerCallbackQuery(query.id); return; }
+    const vpnDetail = data.match(/^vpn:d:([A-Za-z0-9_-]{1,32})$/);
+    if (vpnDetail) { const peers = await updaterApi("/vpn/peers"); const peer = peers.find((p: any) => p.name === vpnDetail[1]); if (!peer) { await editVpnHome(chatId, messageId); return; } const last = peer.handshake ? new Date(peer.handshake * 1000).toLocaleString("it-IT") : "mai"; await bot.editMessageText(`👤 ${peer.name}\nStato: ${peer.enabled ? "abilitato" : "disabilitato"}\nIP: ${peer.ipv4}\nUltimo accesso: ${last}\nTraffico: ↓ ${peer.rx} B · ↑ ${peer.tx} B`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: peer.enabled ? "⏸ Disabilita" : "▶️ Abilita", callback_data: `vpn:e:${peer.name}:${peer.enabled ? 0 : 1}` }], [{ text: "📄 Scarica config", callback_data: `vpn:c:${peer.name}` }, { text: "🔑 Rigenera", callback_data: `vpn:r:${peer.name}` }], [{ text: "🗑 Elimina", callback_data: `vpn:q:${peer.name}` }], [{ text: "⬅️ Utenti", callback_data: "vpn:home" }]] } }); await bot.answerCallbackQuery(query.id); return; }
+    const vpnEnable = data.match(/^vpn:e:([A-Za-z0-9_-]{1,32}):(0|1)$/);
+    if (vpnEnable) { await updaterApi(`/vpn/peers/${vpnEnable[1]}/${vpnEnable[2] === "1" ? "enable" : "disable"}`, { method: "POST", body: "{}" }); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id, { text: "Stato aggiornato" }); return; }
+    const vpnConfig = data.match(/^vpn:c:([A-Za-z0-9_-]{1,32})$/);
+    if (vpnConfig) { const result = await updaterApi(`/vpn/peers/${vpnConfig[1]}/config`); const sent = await bot.sendDocument(chatId, Buffer.from(result.config), {}, { filename: `${vpnConfig[1]}.conf`, contentType: "text/plain" }); trackMessage(sent.chat.id, sent.message_id); await bot.answerCallbackQuery(query.id); return; }
+    const vpnRotate = data.match(/^vpn:r:([A-Za-z0-9_-]{1,32})$/);
+    if (vpnRotate) { await updaterApi(`/vpn/peers/${vpnRotate[1]}/rotate`, { method: "POST", body: "{}" }); await bot.answerCallbackQuery(query.id, { text: "Chiavi rigenerate: scarica la nuova config", show_alert: true }); return; }
+    const vpnConfirm = data.match(/^vpn:q:([A-Za-z0-9_-]{1,32})$/);
+    if (vpnConfirm) { await bot.editMessageText(`Eliminare definitivamente ${vpnConfirm[1]}?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: "🗑 Conferma", callback_data: `vpn:x:${vpnConfirm[1]}` }], [{ text: "Annulla", callback_data: `vpn:d:${vpnConfirm[1]}` }]] } }); await bot.answerCallbackQuery(query.id); return; }
+    const vpnDelete = data.match(/^vpn:x:([A-Za-z0-9_-]{1,32})$/);
+    if (vpnDelete) { await updaterApi(`/vpn/peers/${vpnDelete[1]}`, { method: "DELETE" }); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id, { text: "Utente eliminato" }); return; }
     if (data === "lists:home") {
       await editListsHome(chatId, messageId);
       await bot.answerCallbackQuery(query.id);
@@ -647,6 +679,14 @@ bot.on("message", async msg => {
   }
 
   try {
+    const pendingPeerMessageId = pendingPeerAdd.get(chatId);
+    if (pendingPeerMessageId !== undefined && !text.startsWith("/")) {
+      await updaterApi("/vpn/peers", { method: "POST", body: JSON.stringify({ name: text }) });
+      pendingPeerAdd.delete(chatId);
+      await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+      await editVpnHome(chatId, pendingPeerMessageId);
+      return;
+    }
     const pendingMessageId = pendingListAdd.get(chatId);
     if (pendingMessageId !== undefined) {
       if (text.startsWith("/")) {
@@ -757,6 +797,10 @@ bot.on("message", async msg => {
         reply_markup: view.reply_markup,
       });
       return;
+    }
+
+    if (text === "/vpn") {
+      pendingPeerAdd.delete(chatId); const view = await vpnView(); await sendTrackedMessage(chatId, view.text, { reply_markup: view.reply_markup }); return;
     }
 
     if (text === "/topblocked") {
