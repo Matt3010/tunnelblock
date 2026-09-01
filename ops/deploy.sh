@@ -94,12 +94,6 @@ verify_stack() {
   wait_service updater healthy || return 1
   wait_service telegram-bot running || return 1
   wait_service wireguard healthy || return 1
-  if docker compose config --services | grep -qx discovery-relay-host; then
-    wait_service discovery-relay-host healthy || return 1
-  fi
-  if docker compose config --services | grep -qx discovery-relay-vpn; then
-    wait_service discovery-relay-vpn healthy || return 1
-  fi
 
   for i in $(seq 1 30); do
     if verify_updater_revision "$EXPECTED_SHA"; then
@@ -163,12 +157,6 @@ rollback_previous() (
   wait_service telegram-bot running
   if docker compose config --services | grep -qx wireguard; then
     wait_service wireguard healthy
-  fi
-  if docker compose config --services | grep -qx discovery-relay-host; then
-    wait_service discovery-relay-host healthy
-  fi
-  if docker compose config --services | grep -qx discovery-relay-vpn; then
-    wait_service discovery-relay-vpn healthy
   fi
   verify_updater_revision "$PREVIOUS_SHA"
 )

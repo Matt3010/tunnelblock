@@ -28,15 +28,6 @@ Raspberry Pi / Docker
   |      +--> shared allow/block rules
   |      +--> shared persistent SQLite statistics
   |
-  +--> discovery-relay-vpn (shares WireGuard network namespace)
-  |       |
-  |       +--> authenticated local control channel
-  |                    |
-  |                    v
-  +--> discovery-relay-host (host network)
-  |       +--> mDNS queries/responses on the home LAN
-  |       +--> SSDP M-SEARCH/responses on the home LAN
-  |
   +--> updater
   +--> telegram-bot
 ```
@@ -75,13 +66,10 @@ The VPN provides:
 - IPv4/IPv6 upstream resolver support and configurable query rate limiting;
 - in-memory LRU response cache that respects and ages upstream TTL values;
 - persistent keys/configuration;
-- local-device discovery proxy for IPv4 mDNS/Bonjour and SSDP M-SEARCH;
 - iPhone client configuration and QR generation;
 - health checking and updater integration.
 
 Filtering remains DNS-based: HTTPS payloads are not intercepted or modified.
-
-Local discovery is deliberately selective rather than a Layer-2 bridge. VPN mDNS queries and SSDP M-SEARCH requests are proxied onto the preferred home LAN interface; matching LAN responses are returned only to VPN clients that recently requested discovery. The relay does not forward arbitrary broadcast or multicast traffic.
 
 See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup, iPhone import and verification.
 

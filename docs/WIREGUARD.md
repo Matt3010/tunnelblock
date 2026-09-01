@@ -16,8 +16,6 @@ WireGuard ON
 
 There is no TLS interception, private CA, transparent HTTPS proxy or request-level filtering.
 
-IPv4 local-device discovery is proxied selectively for mDNS/Bonjour and SSDP. This is not a Layer-2 bridge and it does not forward arbitrary broadcasts or multicast groups.
-
 ## Runtime files and key persistence
 
 The first successful start creates:
@@ -180,35 +178,7 @@ Failure:
 
 - an IPv6 address belonging to the mobile carrier or the remote Wi-Fi network is visible while WireGuard is enabled.
 
-### 5. Check local device discovery
-
-With Wi-Fi disabled and WireGuard enabled on the iPhone, open an app that normally discovers a LAN device through Bonjour/mDNS, AirPlay-style DNS-SD, UPnP or DLNA.
-
-On the Raspberry, check relay health:
-
-```bash
-docker compose ps discovery-relay-host discovery-relay-vpn
-```
-
-Both services must be `healthy`.
-
-To inspect relay startup without exposing secrets:
-
-```bash
-docker compose logs --tail=50 discovery-relay-host discovery-relay-vpn
-```
-
-The host relay should report the preferred LAN interface and its IPv4 address. On a host with Ethernet metric lower than Wi-Fi, it will normally choose `eth0`.
-
-Discovery behavior is deliberately scoped:
-
-- mDNS/Bonjour queries from a VPN peer are emitted on the LAN and IPv4 responses are returned to recently active queriers;
-- SSDP `M-SEARCH` requests are emitted on the LAN and unicast responses are returned to the requesting VPN address and source port;
-- IPv6 mDNS, arbitrary multicast/broadcast forwarding and Layer-2 bridging are outside this implementation.
-
-Direct access to device addresses such as `192.168.1.x` continues to use the existing VPN-to-LAN routed path.
-
-### 6. Check all-route configuration
+### 5. Check all-route configuration
 
 The generated client configuration must contain:
 

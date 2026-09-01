@@ -30,17 +30,6 @@ Raspberry Pi / Docker
   |      +--> shared rules under data/rules/
   |      +--> shared SQLite statistics volume
   |
-  +--> discovery-relay-vpn
-  |      (shares wireguard network namespace)
-  |                |
-  |                | authenticated UDP control
-  |                v
-  +--> discovery-relay-host
-  |      (host network, preferred LAN interface)
-  |                |
-  |                +--> mDNS 224.0.0.251:5353
-  |                +--> SSDP 239.255.255.250:1900
-  |
   +--> updater
   +--> telegram-bot
 ```
@@ -57,23 +46,6 @@ It has:
 This prevents a VPN client from receiving a route to updater, Telegram or the resolver admin HTTP API. DNS is exposed to the peer only through `10.66.66.1:53` inside the WireGuard interface.
 
 No host DNS port is published.
-
-## Local discovery boundary
-
-WireGuard is a Layer-3 tunnel, so multicast discovery cannot be treated as a normal routed destination. The gateway therefore DNATs only these packets arriving from `wg0` to the VPN-side discovery relay:
-
-- IPv4 mDNS/Bonjour: `224.0.0.251:5353/udp`;
-- SSDP discovery: `239.255.255.250:1900/udp`.
-
-`discovery-relay-vpn` shares the WireGuard network namespace and talks to `discovery-relay-host` over an HMAC-authenticated UDP control channel. The host relay uses `network_mode: host` so it can emit discovery packets directly on the Raspberry's preferred physical LAN interface; by default this is auto-detected from the lowest-metric IPv4 default route.
-
-The proxy is intentionally one-purpose:
-
-- VPN mDNS queries are sent to the LAN; LAN mDNS responses are returned to recently active VPN queriers;
-- VPN SSDP `M-SEARCH` requests are sent to the LAN; corresponding unicast SSDP responses are returned to the original VPN source ports;
-- arbitrary multicast, broadcasts, LAN-originated queries and VPN-originated service advertisements are not bridged.
-
-The control channel reuses the existing admin token only as HMAC key material. Control datagrams have a timestamp, unique ID, replay protection and a size limit. Both relay containers run read-only, without Linux capabilities and with `no-new-privileges`.
 
 ## Resolver path
 
