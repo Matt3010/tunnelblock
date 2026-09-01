@@ -6,6 +6,7 @@ import { startRawDnsServer, type RawDnsContext } from "./raw-dns.js";
 import { parseQuestion, buildBlockedResponse, buildErrorResponse } from "./dns.js";
 import { DnsRateLimiter } from "./rate-limit.js";
 import { forwardDnsQuery, type UpstreamFamily } from "./upstream.js";
+import { DnsCache } from "./cache.js";
 import { RuleEngine } from "./rules.js";
 import { BlocklistManager } from "./lists.js";
 import {
@@ -40,6 +41,8 @@ const upstreamFamily = (process.env.UPSTREAM_DNS_FAMILY ?? "auto") as UpstreamFa
 const upstreamTimeoutMs = Number(process.env.UPSTREAM_DNS_TIMEOUT_MS ?? 3000);
 const rateLimitQps = Number(process.env.DNS_RATE_LIMIT_QPS ?? 200);
 const rateLimitBurst = Number(process.env.DNS_RATE_LIMIT_BURST ?? 400);
+const cacheMaxEntries = Number(process.env.DNS_CACHE_MAX_ENTRIES ?? 10000);
+const cacheMaxTtlSeconds = Number(process.env.DNS_CACHE_MAX_TTL_SECONDS ?? 3600);
 if (!Number.isInteger(upstreamPort) || upstreamPort < 1 || upstreamPort > 65535) {
   throw new Error("invalid UPSTREAM_DNS_PORT");
 }
@@ -50,6 +53,7 @@ if (!Number.isFinite(upstreamTimeoutMs) || upstreamTimeoutMs < 100) {
   throw new Error("invalid UPSTREAM_DNS_TIMEOUT_MS");
 }
 const rateLimiter = new DnsRateLimiter(rateLimitQps, rateLimitBurst);
+const dnsCache = new DnsCache(cacheMaxEntries, cacheMaxTtlSeconds);
 const adminToken = process.env.ADMIN_API_TOKEN;
 
 const startedAt = Date.now();
@@ -193,6 +197,7 @@ async function resolveDns(packet: Buffer, context: RawDnsContext): Promise<Buffe
 
   void recordQuery(question.qname, decision);
 
+  const cached = decision === "allow" ? dnsCache.get(packet) : null;
   app.log.info({
     qname: question.qname,
     qtype: question.qtype,
@@ -200,20 +205,25 @@ async function resolveDns(packet: Buffer, context: RawDnsContext): Promise<Buffe
     decisionSource: detail.source,
     matchedRule: detail.matchedRule,
     bytes: packet.length,
+    cacheHit: cached !== null,
   }, "dns-query");
 
   if (decision === "block") return buildBlockedResponse(packet);
-  return forwardDnsQuery(packet, {
+  if (cached) return cached;
+  const response = await forwardDnsQuery(packet, {
     host: upstreamHost,
     port: upstreamPort,
     family: upstreamFamily,
     timeoutMs: upstreamTimeoutMs,
   });
+  dnsCache.set(packet, response);
+  return response;
 }
 
 app.get("/health", async () => ({
   ok: true,
   statsStorage: statsReady() ? "sqlite" : "degraded",
+  dnsCacheEntries: dnsCache.size(),
 }));
 
 app.get("/ready", async (_request, reply) => {
@@ -246,6 +256,7 @@ app.get("/admin/status", async (request, reply) => {
       externalBlockedDomains: listDiagnostics.combinedDomainCount,
       blocklistDuplicateEntries: listDiagnostics.duplicateEntries,
       blocklistErrors: listDiagnostics.unhealthyCount,
+      dnsCacheEntries: dnsCache.size(),
       ...stats,
     };
   } catch (error) {

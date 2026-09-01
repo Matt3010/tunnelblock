@@ -64,6 +64,7 @@ The VPN provides:
 - VPN DNS routed through the existing rule engine;
 - compressed DNS-name parsing and automatic UDP-to-TCP upstream fallback;
 - IPv4/IPv6 upstream resolver support and configurable query rate limiting;
+- in-memory LRU response cache that respects and ages upstream TTL values;
 - persistent keys/configuration;
 - iPhone client configuration and QR generation;
 - health checking and updater integration.
