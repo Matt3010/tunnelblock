@@ -122,6 +122,7 @@ deploy_target() (
 
   log "== Pre-flight: DNS tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1
+  docker compose run --rm --no-deps --entrypoint npm updater test >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: TypeScript checks =="
   docker compose run --rm --no-deps --entrypoint npm doh-a run typecheck >>"$LOG_FILE" 2>&1

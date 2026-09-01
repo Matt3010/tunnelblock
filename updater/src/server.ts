@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import Fastify from "fastify";
+import { runtimeNeedsDeployment } from "./revision.js";
 
 const execFileAsync = promisify(execFile);
 const app = Fastify({ logger: true });
@@ -458,6 +459,15 @@ async function checkForUpdates(): Promise<void> {
 
     if (remote !== local) {
       app.log.info({ local, remote }, "new-master-revision-detected");
+      await launchDeployment("automatic");
+      return;
+    }
+
+    if (runtimeNeedsDeployment(remote, runtimeBuildSha)) {
+      app.log.info(
+        { remote, runtimeBuildSha },
+        "stale-runtime-revision-detected",
+      );
       await launchDeployment("automatic");
       return;
     }

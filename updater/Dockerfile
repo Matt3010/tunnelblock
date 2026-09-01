@@ -11,6 +11,7 @@ COPY updater/package*.json ./
 RUN npm install
 
 COPY updater/src ./src
+COPY updater/test ./test
 RUN npm run typecheck
 
 COPY updater/bootstrap-update.sh /bootstrap-update.sh
