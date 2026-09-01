@@ -116,5 +116,8 @@ case "$ACTION" in
   conf)
     require_name; cat "$(peer_dir "$NAME")/$NAME.conf"
     ;;
-  *) echo 'usage: peer-manager.sh list|add|get|enable|disable|rotate|delete|conf [name]' >&2; exit 64 ;;
+  png)
+    require_name; cat "$(peer_dir "$NAME")/$NAME.png"
+    ;;
+  *) echo 'usage: peer-manager.sh list|add|get|enable|disable|rotate|delete|conf|png [name]' >&2; exit 64 ;;
 esac

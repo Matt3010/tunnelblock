@@ -123,6 +123,7 @@ fi
 # This namespace is a dedicated Internet gateway. Default-deny forwarding prevents
 # the VPN peer from pivoting into vpn-dns or any other Docker-attached network.
 iptables -P FORWARD DROP
+iptables -A FORWARD -i wg0 -o wg0 -j ACCEPT
 iptables -A FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT
 iptables -A FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables -t nat -A POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE
@@ -133,6 +134,7 @@ IPV6_NAT=0
 
 if [ "$IPV6_INTERFACE" -eq 1 ] && ip6tables -P FORWARD DROP 2>/dev/null; then
   IPV6_FIREWALL=1
+  ip6tables -A FORWARD -i wg0 -o wg0 -j ACCEPT
 
   if IPV6_ROUTE="$(ip -6 route get 2606:4700:4700::1111 2>/dev/null)"; then
     IPV6_EGRESS_IF="$(printf '%s\n' "$IPV6_ROUTE" | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
@@ -201,12 +203,14 @@ IFS="$OLD_IFS"
 cleanup() {
   set +e
   [ -n "${DNSMASQ_PID:-}" ] && kill "$DNSMASQ_PID" 2>/dev/null
+  iptables -D FORWARD -i wg0 -o wg0 -j ACCEPT 2>/dev/null
   iptables -D FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT 2>/dev/null
   iptables -D FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
   iptables -t nat -D POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE 2>/dev/null
   iptables -P FORWARD ACCEPT 2>/dev/null
 
   if [ "$IPV6_FIREWALL" -eq 1 ]; then
+    ip6tables -D FORWARD -i wg0 -o wg0 -j ACCEPT 2>/dev/null
     if [ -n "$IPV6_EGRESS_IF" ]; then
       ip6tables -D FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT 2>/dev/null
       ip6tables -D FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null

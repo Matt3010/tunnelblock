@@ -603,6 +603,20 @@ app.get("/vpn/peers/:name/config", async (request, reply) => {
   return { name, config: await wireguardPeerCommand("conf", name) };
 });
 
+app.get("/vpn/peers/:name/qr", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+  const { name } = request.params as { name: string };
+  if (!validPeerName(name)) return reply.code(400).send({ error: "invalid peer name" });
+  const args = ["compose", "exec", "-T", "wireguard", "/app/peer-manager.sh", "png", name];
+  const { stdout } = await execFileAsync("docker", args, {
+    cwd: repoDir,
+    env: process.env,
+    encoding: "buffer",
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  return { name, pngBase64: stdout.toString("base64") };
+});
+
 await app.listen({
   host: "0.0.0.0",
   port: Number(process.env.PORT ?? 8090),
