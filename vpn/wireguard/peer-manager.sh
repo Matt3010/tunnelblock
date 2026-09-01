@@ -30,7 +30,7 @@ MTU = ${WG_MTU:-1420}
 PublicKey = $(cat "$CONFIG_DIR/server_public.key")
 PresharedKey = $(cat "$PDIR/preshared.key")
 Endpoint = $ENDPOINT:${WG_SERVER_PORT:-51820}
-AllowedIPs = ${WG_ALLOWED_IPS:-0.0.0.0/0, 224.0.0.251/32, 239.255.255.250/32, ::/0}
+AllowedIPs = ${WG_ALLOWED_IPS:-0.0.0.0/0, ::/0}
 PersistentKeepalive = 25
 EOF
   chmod 0600 "$PDIR/$NAME.conf"
