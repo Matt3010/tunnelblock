@@ -67,7 +67,7 @@ services:
       WG_SERVER_IPV6_ADDRESS: fd42:66:66::1/64
       WG_IPV4_SUBNET: 10.66.66.0/24
       WG_IPV6_SUBNET: fd42:66:66::/64
-      WG_ALLOWED_IPS: 0.0.0.0/0, ::/0
+      WG_ALLOWED_IPS: 0.0.0.0/0, 224.0.0.251/32, 239.255.255.250/32, ::/0
       WG_DNS_SERVERS: 10.66.66.1
       WG_DNS_UPSTREAMS: doh-a,doh-b
       WG_MTU: 1420
