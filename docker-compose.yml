@@ -71,6 +71,7 @@ services:
       WG_DNS_SERVERS: 10.66.66.1
       WG_DNS_UPSTREAMS: doh-a,doh-b
       WG_MTU: 1420
+      WG_DISCOVERY_RELAY: "1"
     volumes:
       - ${HOST_REPO_DIR:-.}/data/wireguard:/config
       - /lib/modules:/lib/modules:ro
@@ -89,6 +90,74 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+
+  discovery-relay-host:
+    image: adblock-general-purpose-discovery-relay:latest
+    build:
+      context: .
+      dockerfile: vpn/discovery-relay/Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DISCOVERY_MODE: host
+      DISCOVERY_LAN_IFACE: ${DISCOVERY_LAN_IFACE:-auto}
+      DISCOVERY_RELAY_PORT: 39090
+      DISCOVERY_RELAY_TOKEN: ${ADMIN_API_TOKEN}
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - test
+        - -f
+        - /tmp/discovery-relay.ready
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+
+  discovery-relay-vpn:
+    image: adblock-general-purpose-discovery-relay:latest
+    build:
+      context: .
+      dockerfile: vpn/discovery-relay/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      wireguard:
+        condition: service_healthy
+      discovery-relay-host:
+        condition: service_healthy
+    network_mode: service:wireguard
+    environment:
+      DISCOVERY_MODE: vpn
+      DISCOVERY_RELAY_PORT: 39090
+      DISCOVERY_RELAY_TOKEN: ${ADMIN_API_TOKEN}
+      DISCOVERY_WG_IFACE: wg0
+      WG_IPV4_SUBNET: 10.66.66.0/24
+      DISCOVERY_MDNS_CLIENT_TTL: 120
+      DISCOVERY_SSDP_CLIENT_TTL: 15
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - test
+        - -f
+        - /tmp/discovery-relay.ready
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
 
   updater:
     image: adblock-general-purpose-updater:latest
