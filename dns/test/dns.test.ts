@@ -31,4 +31,21 @@ describe("dns parser", () => {
     expect(res.readUInt16BE(0)).toBe(0x1234);
     expect(res.readUInt16BE(6)).toBe(0);
   });
+
+  it("parses a compressed QNAME and rejects pointer loops", () => {
+    const base = queryFor("ads.example.com");
+    const compressed = Buffer.concat([
+      base.subarray(0, 12),
+      Buffer.from([3]), Buffer.from("www"),
+      Buffer.from([0xc0, 0x16]),
+      base.subarray(base.length - 4),
+      Buffer.from([7]), Buffer.from("example"), Buffer.from([3]), Buffer.from("com"), Buffer.from([0]),
+    ]);
+    expect(parseQuestion(compressed).qname).toBe("www.example.com");
+
+    const loop = Buffer.concat([
+      base.subarray(0, 12), Buffer.from([0xc0, 0x0c]), base.subarray(base.length - 4),
+    ]);
+    expect(() => parseQuestion(loop)).toThrow(/pointer loop/);
+  });
 });

@@ -14,7 +14,7 @@ WireGuard ON
   -> IPv4 and IPv6 routes are captured by the tunnel
 ```
 
-There is no TLS interception, private CA, transparent HTTPS proxy, QUIC blocking or YouTube request classification in this phase.
+There is no TLS interception, private CA, transparent HTTPS proxy or request-level filtering.
 
 ## Runtime files and key persistence
 

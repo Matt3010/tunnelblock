@@ -107,46 +107,18 @@ verify_stack() {
   return 1
 }
 
-ensure_phase2_off() {
-  CID="$(docker compose ps -q wireguard 2>/dev/null || true)"
-  if [ -n "$CID" ]; then
-    docker compose exec -T wireguard sh -c \
-      'if [ -x /app/phase2-firewall.sh ]; then /app/phase2-firewall.sh https disable; /app/phase2-firewall.sh quic allow; fi' \
-      >>"$LOG_FILE" 2>&1 || true
-  fi
-  docker compose --profile https-lab rm -f -s mitmproxy >>"$LOG_FILE" 2>&1 || true
-}
-
 deploy_target() (
   set -eu
 
   log "== Deploy $TARGET_SHA =="
-  mkdir -p data/mitmproxy-public
-  chmod 0755 data/mitmproxy-public
-  if [ -s data/mitmproxy/mitmproxy-ca-cert.cer ]; then
-    cp data/mitmproxy/mitmproxy-ca-cert.cer data/mitmproxy-public/mitmproxy-ca-cert.cer.tmp
-    chmod 0644 data/mitmproxy-public/mitmproxy-ca-cert.cer.tmp
-    mv -f data/mitmproxy-public/mitmproxy-ca-cert.cer.tmp data/mitmproxy-public/mitmproxy-ca-cert.cer
-  fi
-  log "== Ensure Phase-2 lab is off before pre-flight =="
-  ensure_phase2_off
-
   log "== Pre-flight: docker compose config =="
   docker compose config --quiet >>"$LOG_FILE" 2>&1
-  docker compose --profile https-lab config --quiet >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: build complete stack =="
   docker compose build >>"$LOG_FILE" 2>&1
-  docker compose --profile https-lab build mitmproxy >>"$LOG_FILE" 2>&1
 
-  log "== Pre-flight: WireGuard/Phase-2 shell checks =="
-  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/phase2-firewall.sh scripts/wireguard-client.sh scripts/https-intercept.sh scripts/quic.sh scripts/phase2-status.sh scripts/youtube-ump-filter.sh scripts/mitmproxy-ca.sh >>"$LOG_FILE" 2>&1
-
-  log "== Pre-flight: Phase-2 Python checks =="
-  python3 -B -m unittest \
-    phase2/mitmproxy/test_analyze_observations.py \
-    phase2/mitmproxy/test_protobuf_scan.py \
-    phase2/mitmproxy/test_ump_diagnostics.py >>"$LOG_FILE" 2>&1
+  log "== Pre-flight: WireGuard shell checks =="
+  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh scripts/wireguard-client.sh >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: DNS tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1

@@ -16,9 +16,6 @@ ALLOWED_IPS="${WG_ALLOWED_IPS:-0.0.0.0/0, ::/0}"
 DNS_SERVERS="${WG_DNS_SERVERS:-10.66.66.1}"
 DNS_UPSTREAMS="${WG_DNS_UPSTREAMS:-doh-a,doh-b}"
 MTU="${WG_MTU:-1420}"
-CA_HTTP_ADDRESS="${WG_CA_HTTP_ADDRESS:-10.66.66.1}"
-CA_HTTP_PORT="${WG_CA_HTTP_PORT:-8081}"
-CA_PUBLIC_DIR="${WG_CA_PUBLIC_DIR:-/ca-public}"
 
 case "$CLIENT_NAME" in
   ""|*[!A-Za-z0-9_-]*)
@@ -226,7 +223,6 @@ IFS="$OLD_IFS"
 cleanup() {
   set +e
   [ -n "${DNSMASQ_PID:-}" ] && kill "$DNSMASQ_PID" 2>/dev/null
-  [ -n "${CA_HTTP_PID:-}" ] && kill "$CA_HTTP_PID" 2>/dev/null
   iptables -D FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT 2>/dev/null
   iptables -D FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
   iptables -t nat -D POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE 2>/dev/null
@@ -247,14 +243,6 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 echo "WireGuard ready on UDP $SERVER_PORT; client material persisted under /config/peers/$CLIENT_NAME."
-httpd -f -p "$CA_HTTP_ADDRESS:$CA_HTTP_PORT" -h "$CA_PUBLIC_DIR" &
-CA_HTTP_PID="$!"
-sleep 1
-if ! kill -0 "$CA_HTTP_PID" 2>/dev/null; then
-  echo "Unable to start VPN-only CA download endpoint on $CA_HTTP_ADDRESS:$CA_HTTP_PORT" >&2
-  exit 6
-fi
-echo "Public CA download endpoint: http://$CA_HTTP_ADDRESS:$CA_HTTP_PORT/mitmproxy-ca-cert.cer"
 dnsmasq --keep-in-foreground --conf-file="$DNSMASQ_CONF" &
 DNSMASQ_PID="$!"
 wait "$DNSMASQ_PID"

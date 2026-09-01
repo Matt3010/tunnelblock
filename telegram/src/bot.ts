@@ -716,7 +716,6 @@ bot.on("message", async msg => {
             `doh-a: ${updaterResult.value.services.dohA ?? "unknown"}`,
             `doh-b: ${updaterResult.value.services.dohB ?? "unknown"}`,
             `wireguard: ${updaterResult.value.services.wireguard ?? "unknown"}`,
-            `mitmproxy: ${updaterResult.value.services.mitmproxy ?? "unknown"}`,
             `bot: ${updaterResult.value.services.telegram ?? "unknown"}`,
           ]
         : [];

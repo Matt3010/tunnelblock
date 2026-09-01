@@ -12,6 +12,10 @@ x-doh-common: &doh-common
     DNS_PORT: 53
     UPSTREAM_DNS_HOST: 1.1.1.1
     UPSTREAM_DNS_PORT: 53
+    UPSTREAM_DNS_FAMILY: auto
+    UPSTREAM_DNS_TIMEOUT_MS: 3000
+    DNS_RATE_LIMIT_QPS: 200
+    DNS_RATE_LIMIT_BURST: 400
     ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
     STATS_DB_PATH: /stats/stats.sqlite
   volumes:
@@ -68,11 +72,8 @@ services:
       WG_DNS_SERVERS: 10.66.66.1
       WG_DNS_UPSTREAMS: doh-a,doh-b
       WG_MTU: 1420
-      WG_CA_HTTP_ADDRESS: 10.66.66.1
-      WG_CA_HTTP_PORT: 8081
     volumes:
       - ${HOST_REPO_DIR:-.}/data/wireguard:/config
-      - ${HOST_REPO_DIR:-.}/data/mitmproxy-public:/ca-public:ro
       - /lib/modules:/lib/modules:ro
     ports:
       - "51820:51820/udp"
@@ -85,53 +86,6 @@ services:
       test:
         - CMD
         - /app/healthcheck.sh
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-
-  mitmproxy:
-    profiles:
-      - https-lab
-    build:
-      context: .
-      dockerfile: phase2/mitmproxy/Dockerfile
-    restart: "no"
-    depends_on:
-      wireguard:
-        condition: service_healthy
-    network_mode: "service:wireguard"
-    environment:
-      OBSERVATION_LOG: /home/mitmproxy/.mitmproxy/observations/metadata.jsonl
-      OBSERVATION_MAX_BYTES: 26214400
-      OBSERVATION_HOST_SUFFIXES: youtube.com,googlevideo.com,googleapis.com,ytimg.com,ggpht.com,doubleclick.net,googlesyndication.com,googleadservices.com
-      PROTOBUF_BACKTRACK_BYTES: 8192
-      OBSERVATION_LOG_ENABLED: "${OBSERVATION_LOG_ENABLED:-true}"
-      UMP_DIAGNOSTICS_ENABLED: "${UMP_DIAGNOSTICS_ENABLED:-false}"
-      YOUTUBE_UMP_FILTER_ENABLED: "${YOUTUBE_UMP_FILTER_ENABLED:-false}"
-      OBSERVATION_SESSION: "${OBSERVATION_SESSION:-}"
-    volumes:
-      - ${HOST_REPO_DIR:-.}/data/mitmproxy:/home/mitmproxy/.mitmproxy
-    command:
-      - mitmdump
-      - --mode
-      - transparent
-      - --listen-host
-      - 0.0.0.0
-      - --listen-port
-      - "8080"
-      - --set
-      - confdir=/home/mitmproxy/.mitmproxy
-      - --set
-      - flow_detail=0
-      - -s
-      - /addons/observe.py
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import socket; s=socket.create_connection(('127.0.0.1',8080),2); s.close()"
       interval: 10s
       timeout: 3s
       retries: 5

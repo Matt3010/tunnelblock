@@ -1,7 +1,15 @@
 import dgram from "node:dgram";
 import net from "node:net";
 
-export type RawDnsResolver = (packet: Buffer) => Promise<Buffer>;
+export type RawDnsContext = {
+  transport: "udp" | "tcp";
+  remoteAddress: string;
+};
+
+export type RawDnsResolver = (
+  packet: Buffer,
+  context: RawDnsContext,
+) => Promise<Buffer>;
 
 type RawDnsLogger = {
   info: (...args: any[]) => void;
@@ -73,7 +81,7 @@ export async function startRawDnsServer(options: {
   const udp = dgram.createSocket("udp4");
 
   udp.on("message", (packet, remote) => {
-    void resolve(packet)
+    void resolve(packet, { transport: "udp", remoteAddress: remote.address })
       .then(response => {
         udp.send(response, remote.port, remote.address, error => {
           if (error) {
@@ -105,7 +113,10 @@ export async function startRawDnsServer(options: {
       for (const message of decoded.messages) {
         chain = chain
           .then(async () => {
-            const response = await resolve(message);
+            const response = await resolve(message, {
+              transport: "tcp",
+              remoteAddress: socket.remoteAddress ?? "unknown",
+            });
             if (!socket.destroyed) {
               socket.write(encodeTcpDnsFrame(response));
             }

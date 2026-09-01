@@ -55,49 +55,22 @@ The resolver HTTP/admin API and raw DNS replicas are Docker-internal. The host p
 only WireGuard UDP/51820; there is no public DoH, profile-download or resolver health endpoint.
 The iPhone receives DNS `10.66.66.1` from its WireGuard configuration.
 
-After preparing the private CA, its public certificate is available only inside the VPN at
-`http://10.66.66.1:8081/mitmproxy-ca-cert.cer`. Docker does not publish this port on the host.
+## WireGuard
 
-## WireGuard Phase 1
-
-Phase 1 provides only:
+The VPN provides:
 
 - full-tunnel WireGuard for IPv4 and captured IPv6;
 - NAT/forwarding through the Raspberry;
 - VPN DNS routed through the existing rule engine;
+- compressed DNS-name parsing and automatic UDP-to-TCP upstream fallback;
+- IPv4/IPv6 upstream resolver support and configurable query rate limiting;
 - persistent keys/configuration;
 - iPhone client configuration and QR generation;
 - health checking and updater integration.
 
-It does **not** implement HTTPS/TLS interception, a private CA, transparent proxying, QUIC blocking or YouTube request-level filtering.
+Filtering remains DNS-based: HTTPS payloads are not intercepted or modified.
 
 See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup, iPhone import and verification.
-
-## Phase 2 HTTPS observation lab
-
-The repository now also contains a diagnostic transparent-proxy lab for YouTube testing.
-
-It is designed to be safe by default:
-
-- the `mitmproxy` service itself is stopped by default and has no host/router port exposure;
-- `scripts/https-intercept.sh enable` starts the observer and only then installs the HTTPS redirect;
-- QUIC blocking is disabled until `scripts/quic.sh block` is run;
-- the private CA and logs persist only under ignored `data/mitmproxy/`;
-- only metadata for YouTube-related hosts is written;
-- headers, cookies, query strings and request/response bodies are not persisted;
-- no YouTube blocking rule is active by default.
-
-See [docs/HTTPS-OBSERVATION.md](docs/HTTPS-OBSERVATION.md) for the go/no-go test and rollback commands.
-
-Captured metadata can be summarized without exposing individual hosts, paths or payloads:
-
-```bash
-python3 scripts/analyze-youtube-observations.py
-```
-
-The current one-shot experiment follows the modern Onesie/UMP playback path entirely on the Raspberry. It validates the exact plaintext `OnesieRequest.innertube_request` envelope and changes only the public-schema `InnertubeRequest.enable_ad_placements_preroll` boolean from true to false. Request size must remain unchanged and planned/applied counts must match; otherwise the original request is forwarded. It does not depend on cached hot-config keys. Responses are never altered, no external Worker is used, and persistent traffic logging is disabled for the test session.
-
-Use `sh scripts/youtube-ump-filter.sh enable`, then open YouTube normally. Read the privacy-minimized outcome with `sh scripts/youtube-ump-filter.sh result`; it exposes only the mutation state and does not persist traffic metadata. Restore the safe defaults with `sh scripts/youtube-ump-filter.sh disable` after the test.
 
 ## Deployment
 
@@ -105,7 +78,7 @@ The updater watches `master`. A deployment runs the current `ops/deploy.sh`, whi
 
 1. validates the Compose configuration;
 2. builds the complete stack;
-3. syntax-checks WireGuard scripts and tests the Phase-2 metadata analyzer;
+3. syntax-checks WireGuard scripts;
 4. runs DNS tests;
 5. runs TypeScript checks for DNS, Telegram and updater;
 6. recreates the stack only after pre-flight checks pass;
@@ -113,9 +86,3 @@ The updater watches `master`. A deployment runs the current `ops/deploy.sh`, whi
 8. rolls back to the previous SHA if deployment fails.
 
 Persistent data is not reset during this process.
-
-## YouTube
-
-DNS-only filtering cannot safely distinguish YouTube ads from normal video delivery when both use shared Google infrastructure.
-
-The real iPhone go/no-go test confirmed that the official app can be observed over TCP after QUIC is disabled. Field-14 denaturing and payload neutralization were then rejected by live tests. The current observation-only experiment correlates modern encrypted `initplayback`/UMP delivery with visible ad transitions before any local decoder or mutation is attempted.

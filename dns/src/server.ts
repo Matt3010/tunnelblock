@@ -1,24 +1,21 @@
-import dgram from "node:dgram";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
-import { startRawDnsServer } from "./raw-dns.js";
-import { parseQuestion, buildBlockedResponse } from "./dns.js";
+import { startRawDnsServer, type RawDnsContext } from "./raw-dns.js";
+import { parseQuestion, buildBlockedResponse, buildErrorResponse } from "./dns.js";
+import { DnsRateLimiter } from "./rate-limit.js";
+import { forwardDnsQuery, type UpstreamFamily } from "./upstream.js";
 import { RuleEngine } from "./rules.js";
 import { BlocklistManager } from "./lists.js";
 import {
   getDomains,
   getStats,
   getTop,
-  getYouTubeCaptureStatus,
-  getYouTubeReport,
   makeDomainKey,
   recordQuery,
   resolveDomainKey,
-  startYouTubeCapture,
   statsReady,
-  stopYouTubeCapture,
   ensureStatsReady,
 } from "./stats.js";
 
@@ -39,6 +36,20 @@ let rules = RuleEngine.fromFiles(blockPath, allowPath, externalBlockPath);
 
 const upstreamHost = process.env.UPSTREAM_DNS_HOST ?? "1.1.1.1";
 const upstreamPort = Number(process.env.UPSTREAM_DNS_PORT ?? 53);
+const upstreamFamily = (process.env.UPSTREAM_DNS_FAMILY ?? "auto") as UpstreamFamily;
+const upstreamTimeoutMs = Number(process.env.UPSTREAM_DNS_TIMEOUT_MS ?? 3000);
+const rateLimitQps = Number(process.env.DNS_RATE_LIMIT_QPS ?? 200);
+const rateLimitBurst = Number(process.env.DNS_RATE_LIMIT_BURST ?? 400);
+if (!Number.isInteger(upstreamPort) || upstreamPort < 1 || upstreamPort > 65535) {
+  throw new Error("invalid UPSTREAM_DNS_PORT");
+}
+if (!["auto", "4", "6"].includes(upstreamFamily)) {
+  throw new Error("invalid UPSTREAM_DNS_FAMILY");
+}
+if (!Number.isFinite(upstreamTimeoutMs) || upstreamTimeoutMs < 100) {
+  throw new Error("invalid UPSTREAM_DNS_TIMEOUT_MS");
+}
+const rateLimiter = new DnsRateLimiter(rateLimitQps, rateLimitBurst);
 const adminToken = process.env.ADMIN_API_TOKEN;
 
 const startedAt = Date.now();
@@ -171,31 +182,11 @@ fs.watch(path.dirname(blockPath), (_eventType, filename) => {
   }, 150);
 });
 
-async function forwardUdp(packet: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const socket = dgram.createSocket("udp4");
-    const timeout = setTimeout(() => {
-      socket.close();
-      reject(new Error("upstream DNS timeout"));
-    }, 3000);
-
-    socket.once("error", err => {
-      clearTimeout(timeout);
-      socket.close();
-      reject(err);
-    });
-
-    socket.once("message", message => {
-      clearTimeout(timeout);
-      socket.close();
-      resolve(message);
-    });
-
-    socket.send(packet, upstreamPort, upstreamHost);
-  });
-}
-
-async function resolveDns(packet: Buffer): Promise<Buffer> {
+async function resolveDns(packet: Buffer, context: RawDnsContext): Promise<Buffer> {
+  if (!rateLimiter.allow(context.remoteAddress)) {
+    app.log.warn({ ...context }, "dns-rate-limited");
+    return buildErrorResponse(packet, 5);
+  }
   const question = parseQuestion(packet);
   const detail = rules.explain(question.qname);
   const decision = detail.decision;
@@ -212,7 +203,12 @@ async function resolveDns(packet: Buffer): Promise<Buffer> {
   }, "dns-query");
 
   if (decision === "block") return buildBlockedResponse(packet);
-  return forwardUdp(packet);
+  return forwardDnsQuery(packet, {
+    host: upstreamHost,
+    port: upstreamPort,
+    family: upstreamFamily,
+    timeoutMs: upstreamTimeoutMs,
+  });
 }
 
 app.get("/health", async () => ({
@@ -380,61 +376,6 @@ app.post("/admin/reload", async (request, reply) => {
   if (!requireAdmin(request, reply)) return;
   reloadRules();
   return { ok: true };
-});
-
-app.get("/admin/youtube/status", async (request, reply) => {
-  if (!requireAdmin(request, reply)) return;
-
-  try {
-    return await getYouTubeCaptureStatus();
-  } catch (error) {
-    return reply.code(503).send({
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-});
-
-app.post("/admin/youtube/start", async (request, reply) => {
-  if (!requireAdmin(request, reply)) return;
-
-  try {
-    const body = request.body as { label?: string };
-    const session = await startYouTubeCapture(body?.label ?? "");
-    return reply.code(201).send({ ok: true, ...session });
-  } catch (error) {
-    return reply.code(400).send({
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-});
-
-app.post("/admin/youtube/stop", async (request, reply) => {
-  if (!requireAdmin(request, reply)) return;
-
-  try {
-    const session = await stopYouTubeCapture();
-    return { ok: true, ...session };
-  } catch (error) {
-    return reply.code(400).send({
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-});
-
-app.get("/admin/youtube/report", async (request, reply) => {
-  if (!requireAdmin(request, reply)) return;
-
-  try {
-    const report = await getYouTubeReport(20);
-    return {
-      ...report,
-      note: "DNS capture is device-wide; ad-only domains are candidates, not proof that a domain is safe to block.",
-    };
-  } catch (error) {
-    return reply.code(503).send({
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
 });
 
 app.post("/admin/rules/by-key", async (request, reply) => {
