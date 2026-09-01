@@ -18,6 +18,8 @@ There is no TLS interception, private CA, transparent HTTPS proxy or request-lev
 
 IPv4 local-device discovery is proxied selectively for mDNS/Bonjour and SSDP. This is not a Layer-2 bridge and it does not forward arbitrary broadcasts or multicast groups.
 
+On iOS, the mDNS and SSDP multicast destinations are also listed explicitly in the generated client `AllowedIPs`. Although `0.0.0.0/0` covers those addresses mathematically, the official WireGuard iOS client only delivered this discovery traffic to the tunnel in testing when the multicast routes were present explicitly.
+
 ## Runtime files and key persistence
 
 The first successful start creates:
@@ -213,7 +215,7 @@ Direct access to device addresses such as `192.168.1.x` continues to use the exi
 The generated client configuration must contain:
 
 ```text
-AllowedIPs = 0.0.0.0/0, ::/0
+AllowedIPs = 0.0.0.0/0, 224.0.0.251/32, 239.255.255.250/32, ::/0
 DNS = 10.66.66.1
 ```
 
