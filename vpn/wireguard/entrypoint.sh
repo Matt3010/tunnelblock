@@ -13,8 +13,6 @@ ALLOWED_IPS="${WG_ALLOWED_IPS:-0.0.0.0/0, ::/0}"
 DNS_SERVERS="${WG_DNS_SERVERS:-10.66.66.1}"
 DNS_UPSTREAMS="${WG_DNS_UPSTREAMS:-doh-a,doh-b}"
 MTU="${WG_MTU:-1420}"
-DISCOVERY_RELAY="${WG_DISCOVERY_RELAY:-1}"
-SERVER_IPV4="${SERVER_IPV4_ADDRESS%/*}"
 
 mkdir -p "$CONFIG_DIR/peers"
 chmod 0700 "$CONFIG_DIR" "$CONFIG_DIR/peers"
@@ -116,17 +114,6 @@ else
 fi
 ip link set mtu "$MTU" up dev wg0
 
-# WireGuard is Layer 3 and cannot select a peer for outbound multicast destinations.
-# Capture only the discovery groups we explicitly proxy and deliver them locally.
-DISCOVERY_NAT=0
-if [ "$DISCOVERY_RELAY" = "1" ]; then
-  iptables -t nat -A PREROUTING -i wg0 -d 224.0.0.251/32 -p udp --dport 5353 \
-    -j DNAT --to-destination "$SERVER_IPV4:5353"
-  iptables -t nat -A PREROUTING -i wg0 -d 239.255.255.250/32 -p udp --dport 1900 \
-    -j DNAT --to-destination "$SERVER_IPV4:1900"
-  DISCOVERY_NAT=1
-fi
-
 EGRESS_IF="$(ip route get 1.1.1.1 | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
 if [ -z "$EGRESS_IF" ]; then
   echo "Unable to determine IPv4 egress interface" >&2
@@ -216,12 +203,6 @@ IFS="$OLD_IFS"
 cleanup() {
   set +e
   [ -n "${DNSMASQ_PID:-}" ] && kill "$DNSMASQ_PID" 2>/dev/null
-  if [ "$DISCOVERY_NAT" -eq 1 ]; then
-    iptables -t nat -D PREROUTING -i wg0 -d 224.0.0.251/32 -p udp --dport 5353 \
-      -j DNAT --to-destination "$SERVER_IPV4:5353" 2>/dev/null
-    iptables -t nat -D PREROUTING -i wg0 -d 239.255.255.250/32 -p udp --dport 1900 \
-      -j DNAT --to-destination "$SERVER_IPV4:1900" 2>/dev/null
-  fi
   iptables -D FORWARD -i wg0 -o wg0 -j ACCEPT 2>/dev/null
   iptables -D FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT 2>/dev/null
   iptables -D FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
