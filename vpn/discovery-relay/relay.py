@@ -142,11 +142,6 @@ def detect_default_gateway() -> str:
 def make_udp_socket(bind_host: str, bind_port: int) -> socket.socket:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(socket, "SO_REUSEPORT"):
-        try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        except OSError:
-            pass
     sock.bind((bind_host, bind_port))
     sock.setblocking(False)
     return sock
