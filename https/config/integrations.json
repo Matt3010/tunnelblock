@@ -1,0 +1,45 @@
+{
+  "integrations": [
+    {
+      "id": "instagram",
+      "name": "Instagram",
+      "description": "Ispezione HTTPS dell'app ufficiale Instagram, inizialmente observation-only.",
+      "strategy": "strategies.instagram:InstagramStrategy",
+      "hosts": [
+        "instagram.com",
+        "cdninstagram.com",
+        "facebook.com",
+        "facebook.net",
+        "fbcdn.net",
+        "fbsbx.com"
+      ],
+      "actions": [
+        {
+          "id": "certificate",
+          "label": "🔐 Certificato CA",
+          "kind": "certificate"
+        },
+        {
+          "id": "start",
+          "label": "▶️ Avvia ispezione",
+          "kind": "start"
+        },
+        {
+          "id": "summary",
+          "label": "📊 Risultati TLS/HTTP",
+          "kind": "summary"
+        },
+        {
+          "id": "stop",
+          "label": "⏹ Ferma ispezione",
+          "kind": "stop"
+        },
+        {
+          "id": "clear",
+          "label": "🧹 Azzera risultati",
+          "kind": "clear"
+        }
+      ]
+    }
+  ]
+}
