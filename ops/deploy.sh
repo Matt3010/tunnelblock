@@ -117,8 +117,11 @@ deploy_target() (
   log "== Pre-flight: build complete stack =="
   docker compose build >>"$LOG_FILE" 2>&1
 
-  log "== Pre-flight: WireGuard shell checks =="
-  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh scripts/wireguard-client.sh >>"$LOG_FILE" 2>&1
+  log "== Pre-flight: build HTTPS integration lab =="
+  docker compose --profile https-lab build https-proxy >>"$LOG_FILE" 2>&1
+
+  log "== Pre-flight: shell checks =="
+  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/https-firewall.sh scripts/wireguard-client.sh scripts/https-ca.sh scripts/https-runtime.sh >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: DNS tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1
@@ -130,8 +133,12 @@ deploy_target() (
   docker compose run --rm --no-deps --entrypoint npm updater run typecheck >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight passed =="
+  log "== Stop experimental HTTPS lab =="
+  sh scripts/https-runtime.sh stop >>"$LOG_FILE" 2>&1 || true
+
   log "== Recreate complete stack =="
   docker compose up -d --force-recreate --remove-orphans >>"$LOG_FILE" 2>&1
+  sh scripts/https-runtime.sh reset-state >>"$LOG_FILE" 2>&1
 
   log "== Verify stack =="
   verify_stack "$TARGET_SHA"
