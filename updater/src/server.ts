@@ -339,7 +339,7 @@ function httpsObservationInfo(id: string): { bytes: number; modifiedAt: string |
 async function httpsOverview() {
   const declared = loadHttpsRuntimeState();
   const [proxyState, interception, quic] = await Promise.all([
-    serviceRuntimeState("https-proxy"),
+    httpsProxyRuntimeState(),
     httpsFirewallStatus("interception"),
     httpsFirewallStatus("quic"),
   ]);
@@ -360,6 +360,32 @@ async function httpsOverview() {
     quic,
     caReady: fs.existsSync(httpsPublicCaFile),
   };
+}
+
+async function httpsProxyRuntimeState(): Promise<string> {
+  try {
+    const { stdout: idOutput } = await execFileAsync(
+      "docker",
+      ["compose", "--profile", "https-lab", "ps", "-q", "--all", "https-proxy"],
+      { cwd: repoDir, env: process.env },
+    );
+    const containerId = idOutput.trim();
+    if (!containerId) return "stopped";
+
+    const { stdout: stateOutput } = await execFileAsync(
+      "docker",
+      [
+        "inspect",
+        "--format",
+        "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+        containerId,
+      ],
+      { cwd: repoDir, env: process.env },
+    );
+    return stateOutput.trim() || "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 async function serviceRuntimeState(service: string): Promise<string> {
@@ -668,7 +694,7 @@ app.get("/status", async (request, reply) => {
     serviceRuntimeState("doh-b"),
     serviceRuntimeState("telegram-bot"),
     serviceRuntimeState("wireguard"),
-    serviceRuntimeState("https-proxy"),
+    httpsProxyRuntimeState(),
   ]);
 
   const state = liveUpdateState();
