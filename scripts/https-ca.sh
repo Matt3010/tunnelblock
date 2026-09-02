@@ -40,7 +40,8 @@ prepare() {
     return
   fi
 
-  HTTPS_ACTIVE_STRATEGY="" HTTPS_MODE="disabled"     docker compose --profile https-lab up -d --build --force-recreate https-proxy
+  HTTPS_ACTIVE_STRATEGY="" HTTPS_MODE="disabled" \
+    docker compose --profile https-lab up -d --force-recreate https-proxy
 
   if ! wait_proxy; then
     docker compose --profile https-lab stop https-proxy >/dev/null 2>&1 || true

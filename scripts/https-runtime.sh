@@ -68,7 +68,8 @@ case "$ACTION" in
     fi
 
     cleanup_runtime
-    if ! HTTPS_ACTIVE_STRATEGY="$INTEGRATION" HTTPS_MODE="$MODE"       docker compose --profile https-lab up -d --build --force-recreate https-proxy; then
+    if ! HTTPS_ACTIVE_STRATEGY="$INTEGRATION" HTTPS_MODE="$MODE" \
+      docker compose --profile https-lab up -d --force-recreate https-proxy; then
       cleanup_runtime
       write_state false "" disabled
       exit 4

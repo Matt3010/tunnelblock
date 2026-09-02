@@ -230,6 +230,17 @@ const httpsPublicCaFile = path.join(
   "public",
   "adblock-general-purpose-ca.cer",
 );
+let caPreparation: Promise<void> | null = null;
+
+async function ensureHttpsCa(): Promise<void> {
+  if (fs.existsSync(httpsPublicCaFile)) return;
+  if (!caPreparation) {
+    caPreparation = runHttpsScript("scripts/https-ca.sh", ["prepare"])
+      .then(() => undefined)
+      .finally(() => { caPreparation = null; });
+  }
+  await caPreparation;
+}
 
 function loadHttpsIntegrations(): HttpsIntegration[] {
   return loadHttpsRegistry(httpsRegistryPath);
@@ -754,10 +765,10 @@ app.post("/https/ca/prepare", async (request, reply) => {
   }
 
   try {
-    const result = await runHttpsScript("scripts/https-ca.sh", ["prepare"]);
+    await ensureHttpsCa();
     return {
       ok: true,
-      result,
+      result: "ready",
       runtime: await httpsOverview(),
     };
   } catch (error) {
@@ -804,7 +815,7 @@ app.post("/integrations/:id/actions/:action", async (request, reply) => {
     }
     if (metadata.kind === "certificate") {
       if (runtime.active) return reply.code(409).send({ error: "stop HTTPS inspection before preparing the CA" });
-      await runHttpsScript("scripts/https-ca.sh", ["prepare"]);
+      await ensureHttpsCa();
       const certificate = fs.readFileSync(httpsPublicCaFile);
       const parsed = new X509Certificate(certificate);
       return { ok: true, certificate: { filename: "adblock-general-purpose-ca.cer", contentType: "application/x-x509-ca-cert",
