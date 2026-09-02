@@ -5,10 +5,12 @@ import re
 from pathlib import Path
 
 from app.strategies.base import AppStrategy, StrategyConfig
+from app.strategies.generic import GenericStrategy
 from app.strategies.instagram import InstagramStrategy
 
 _ID_RE = re.compile(r"^[a-z0-9_-]{1,24}$")
 _STRATEGY_TYPES = {
+    "generic": GenericStrategy,
     "instagram": InstagramStrategy,
 }
 
