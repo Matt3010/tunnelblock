@@ -90,6 +90,49 @@ services:
       retries: 5
       start_period: 10s
 
+  https-proxy:
+    profiles:
+      - https-lab
+    build:
+      context: .
+      dockerfile: https/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      wireguard:
+        condition: service_healthy
+    network_mode: "service:wireguard"
+    environment:
+      HTTPS_INTEGRATION: ${HTTPS_INTEGRATION:-instagram}
+      HTTPS_INTEGRATIONS_CONFIG: /opt/https/config/integrations.json
+      HTTPS_DATA_DIR: /https-data
+      HTTPS_OBSERVATION_MAX_BYTES: 26214400
+    volumes:
+      - ${HOST_REPO_DIR:-.}/data/https:/https-data
+    command:
+      - mitmdump
+      - --mode
+      - transparent
+      - --listen-host
+      - 0.0.0.0
+      - --listen-port
+      - "8080"
+      - --set
+      - confdir=/https-data/ca
+      - --set
+      - flow_detail=0
+      - -s
+      - /opt/https/addons/main.py
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; s=socket.create_connection(('127.0.0.1',8080),2); s.close()"
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
   updater:
     image: adblock-general-purpose-updater:latest
     build:
