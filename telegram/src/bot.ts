@@ -461,7 +461,7 @@ function integrationsHomeView(data: any) {
         ? "Scegli un’integrazione per vedere le azioni disponibili."
         : "Nessuna integrazione registrata.",
       "",
-      "La CA è condivisa tra tutte le integrazioni. Dopo averla scaricata, installala su iPhone e abilita la fiducia completa nelle impostazioni certificati.",
+      "La CA è condivisa tra tutte le integrazioni. Installala solo per test HTTPS espliciti: non serve al blocco DNS. Ogni app può comunque rifiutare le CA aggiunte dall’utente.",
     ].join("\n"),
     reply_markup: { inline_keyboard: rows },
   };
@@ -497,7 +497,7 @@ function integrationDetailView(item: any, runtime: any) {
       activeHere
         ? "L’intercettazione HTTPS è attiva sul traffico del dispositivo. Ferma la sessione appena terminato il test."
         : runtime?.caReady
-          ? "Prima dell’avvio verifica che la CA sia installata e considerata attendibile da iOS."
+          ? "Prima dell’avvio verifica che la CA sia installata e attendibile sul dispositivo di test."
           : "Prepara e installa prima la CA dal menu Integrazioni.",
     ].join("\n"),
     reply_markup: { inline_keyboard: rows },
@@ -844,10 +844,21 @@ bot.on("message", async msg => {
   try {
     const pendingPeerMessageId = pendingPeerAdd.get(chatId);
     if (pendingPeerMessageId !== undefined && !text.startsWith("/")) {
-      await updaterApi("/vpn/peers", { method: "POST", body: JSON.stringify({ name: text }) });
+      const peer = await updaterApi("/vpn/peers", { method: "POST", body: JSON.stringify({ name: text }) });
       pendingPeerAdd.delete(chatId);
       await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
       await editVpnHome(chatId, pendingPeerMessageId);
+      await sendTrackedMessage(chatId, [
+        `✅ Utente VPN creato: ${peer.name ?? text}`,
+        "",
+        "1. Installa l’app ufficiale WireGuard su iOS o Android.",
+        "2. Apri di nuovo /vpn e seleziona questo utente.",
+        "3. Premi Mostra QR e scansionalo dall’app WireGuard.",
+        "4. Salva e attiva il tunnel.",
+        "5. Verifica handshake e traffico dal dettaglio dell’utente.",
+        "",
+        "Il QR e il file di configurazione contengono chiavi private: non condividerli.",
+      ].join("\n"));
       return;
     }
     const pendingMessageId = pendingListAdd.get(chatId);

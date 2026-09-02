@@ -26,12 +26,12 @@ data/wireguard/
   server_public.key
   wg0.conf
   peers/
-    iphone/
+    phone/
       private.key
       public.key
       preshared.key
-      iphone.conf
-      iphone.png
+      phone.conf
+      phone.png
 ```
 
 `data/` is already ignored by Git.
@@ -48,7 +48,7 @@ Default behavior:
 WG_SERVER_ENDPOINT=auto
 ```
 
-On container start, the gateway discovers the current public IPv4 and writes it into the generated iPhone configuration.
+On container start, the gateway discovers the current public IPv4 and writes it into generated client configurations.
 
 If the home connection has a stable DDNS hostname, set this in the Raspberry repository's local `.env`:
 
@@ -80,7 +80,7 @@ Do not expose:
 - resolver admin routes;
 - Telegram/control APIs.
 
-## Import the iPhone client
+## Import a mobile client
 
 After the WireGuard service is healthy, run on the Raspberry:
 
@@ -88,7 +88,7 @@ After the WireGuard service is healthy, run on the Raspberry:
 sh scripts/wireguard-client.sh qr
 ```
 
-In the official WireGuard iOS app:
+In the official WireGuard app for iOS or Android:
 
 1. tap **Add a tunnel**;
 2. choose **Create from QR code**;
@@ -106,24 +106,24 @@ The QR and raw configuration contain the client's private key and preshared key.
 
 ## Remove the old managed DoH profile
 
-Remove any previously installed AdBlock managed DoH profile from the iPhone. The project is
+On devices previously configured with an AdBlock managed DoH profile, remove that profile. The project is
 WireGuard-only and no longer serves the profile or its public DoH endpoint.
 
 This ensures DNS is sent directly to the WireGuard-provided resolver `10.66.66.1`.
 
 ## Verification
 
-Perform the first remote test with **Wi-Fi disabled on the iPhone** and cellular data enabled. This avoids false negatives caused by routers that do not support NAT loopback/hairpin.
+Perform the first remote test with **Wi-Fi disabled on the mobile device** and cellular data enabled. This avoids false negatives caused by routers that do not support NAT loopback/hairpin.
 
 ### 1. Check WireGuard handshake
 
-Enable the tunnel on the iPhone, then on the Raspberry:
+Enable the tunnel on the mobile device, then on the Raspberry:
 
 ```bash
 docker compose exec -T wireguard wg show wg0
 ```
 
-The iPhone peer must show:
+The mobile peer must show:
 
 - a recent `latest handshake`;
 - increasing receive/transmit counters.
@@ -138,9 +138,9 @@ curl -4 https://api.ipify.org ; echo
 
 Note the result.
 
-With Wi-Fi still disabled and WireGuard enabled on the iPhone, open an IP-check site in Safari.
+With Wi-Fi still disabled and WireGuard enabled, open an IP-check site in the device browser.
 
-The iPhone public IPv4 must equal the Raspberry/home public IPv4. If it shows the mobile carrier address, the full tunnel is not working.
+The device public IPv4 must equal the Raspberry/home public IPv4. If it shows the mobile carrier address, the full tunnel is not working.
 
 ### 3. Check DNS reaches the existing blocker
 
@@ -150,14 +150,14 @@ On the Raspberry:
 docker compose logs -f doh-a doh-b
 ```
 
-Then open a hostname not recently cached on the iPhone.
+Then open a hostname not recently cached on the device.
 
 You should see DNS queries in the existing resolver logs. They also feed the same persistent SQLite statistics and existing Telegram diagnostics.
 
 The VPN DNS path is:
 
 ```text
-iPhone
+Mobile device
   -> 10.66.66.1:53
   -> dnsmasq inside wireguard
   -> doh-a/doh-b:53
@@ -167,7 +167,7 @@ iPhone
 
 ### 4. Check IPv6 cannot bypass the tunnel
 
-With WireGuard enabled, use an IPv6 test site from the iPhone.
+With WireGuard enabled, use an IPv6 test site from the mobile device.
 
 Acceptable Phase-1 outcomes:
 

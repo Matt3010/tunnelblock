@@ -1,12 +1,12 @@
 # adblock-general-purpose
 
-Self-hosted iOS ad-blocking stack running on a Raspberry Pi. Clients use a WireGuard
+Self-hosted mobile ad-blocking stack for iOS and Android running on a Raspberry Pi. Clients use a WireGuard
 **full tunnel**; no public DNS-over-HTTPS endpoint is exposed.
 
 ## Architecture
 
 ```text
-iPhone
+Mobile device (iOS / Android)
   |
   | WireGuard
   | AllowedIPs = 0.0.0.0/0, ::/0
@@ -56,7 +56,7 @@ Never use `docker compose down -v` as part of normal deployment or recovery.
 
 The resolver HTTP/admin API and raw DNS replicas are Docker-internal. The host publishes
 only WireGuard UDP/51820; there is no public DoH, profile-download or resolver health endpoint.
-The iPhone receives DNS `10.66.66.1` from its WireGuard configuration.
+The mobile device receives DNS `10.66.66.1` from its WireGuard configuration.
 
 ## WireGuard
 
@@ -69,7 +69,7 @@ The VPN provides:
 - IPv4/IPv6 upstream resolver support and configurable query rate limiting;
 - in-memory LRU response cache that respects and ages upstream TTL values;
 - persistent keys/configuration;
-- iPhone client configuration and QR generation;
+- platform-independent client configuration and QR generation;
 - health checking and updater integration.
 
 Normal filtering remains DNS-based. An opt-in HTTPS integration lab can temporarily intercept TLS traffic for registered application strategies; it is stopped by default and managed from Telegram.

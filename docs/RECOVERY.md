@@ -16,5 +16,5 @@ docker compose exec -T wireguard /app/healthcheck.sh
 docker compose exec -T wireguard wg show wg0
 ```
 
-If the tunnel is unavailable, temporarily disable WireGuard in the official iOS app to restore
+If the tunnel is unavailable, temporarily disable WireGuard in the official mobile app to restore
 ordinary device connectivity while diagnosing the Raspberry, router UDP/51820 forwarding or ISP.

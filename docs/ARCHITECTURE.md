@@ -3,7 +3,7 @@
 ## Production topology
 
 ```text
-iPhone
+Mobile device (iOS / Android)
   |
   | WireGuard full tunnel
   | 0.0.0.0/0 + ::/0
@@ -74,7 +74,7 @@ Container recreation regenerates derived configuration and QR files but never ro
 
 ## IPv6 policy
 
-The iPhone peer receives a ULA address and `::/0` is present in `AllowedIPs`.
+Each mobile peer receives a ULA address and `::/0` is present in `AllowedIPs`.
 
 This is intentional even on networks where the Raspberry cannot provide working IPv6 egress: IPv6 is captured by WireGuard instead of bypassing the VPN over the phone's carrier/Wi-Fi interface.
 

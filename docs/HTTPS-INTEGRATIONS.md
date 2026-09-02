@@ -6,7 +6,7 @@ Normal VPN and DNS filtering remain unchanged while no HTTPS integration is acti
 ## Architecture
 
 ```text
-iPhone
+Mobile device (iOS / Android)
   |
   | WireGuard full tunnel
   v
@@ -75,6 +75,11 @@ data/https/
 
 Only `data/https/public/adblock-general-purpose-ca.cer` is returned by the authenticated updater
 API for Telegram download. The private CA key is never returned.
+
+The same public certificate can be installed on iOS or Android, but it is never required
+for WireGuard or DNS filtering. Applications may reject user-installed CAs or use
+certificate pinning; Android applications targeting modern API levels do not trust the
+user CA store by default unless their network security configuration opts in.
 
 ## Safety
 
