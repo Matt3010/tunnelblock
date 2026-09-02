@@ -28,6 +28,9 @@ Raspberry Pi / Docker
   |      +--> shared allow/block rules
   |      +--> shared persistent SQLite statistics
   |
+  +--> https-proxy (opt-in profile, stopped by default)
+  |      +--> application strategy registry
+  |
   +--> updater
   +--> telegram-bot
 ```
@@ -69,9 +72,11 @@ The VPN provides:
 - iPhone client configuration and QR generation;
 - health checking and updater integration.
 
-Filtering remains DNS-based: HTTPS payloads are not intercepted or modified.
+Normal filtering remains DNS-based. An opt-in HTTPS integration lab can temporarily intercept TLS traffic for registered application strategies; it is stopped by default and managed from Telegram.
 
-See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup, iPhone import and verification.
+Use `/integrations` in the Telegram bot to prepare/download the private CA, select a registered app strategy and start or stop an observation session. The first registered strategy is Instagram and is observation-only.
+
+See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup and VPN verification, and [docs/HTTPS-INTEGRATIONS.md](docs/HTTPS-INTEGRATIONS.md) for the HTTPS strategy architecture and safety model.
 
 ## Deployment
 
