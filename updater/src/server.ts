@@ -211,6 +211,157 @@ async function wireguardPeerCommand(action: string, name?: string): Promise<stri
   return stdout;
 }
 
+
+type HttpsIntegration = {
+  id: string;
+  name: string;
+  description: string;
+  strategy: string;
+  status: string;
+  actions: string[];
+  hostSuffixes: string[];
+};
+
+type HttpsRuntimeState = {
+  active: boolean;
+  integration: string | null;
+  mode: string;
+  startedAt: string | null;
+};
+
+const httpsRegistryPath = path.join(repoDir, "https", "integrations.json");
+const httpsRuntimeStateFile = path.join(repoDir, "data", "https", "runtime-state.json");
+const httpsPublicCaFile = path.join(
+  repoDir,
+  "data",
+  "https-public",
+  "mitmproxy-ca-cert.cer",
+);
+
+function loadHttpsIntegrations(): HttpsIntegration[] {
+  const payload = JSON.parse(fs.readFileSync(httpsRegistryPath, "utf8")) as {
+    version?: unknown;
+    integrations?: unknown;
+  };
+  if (payload.version !== 1 || !Array.isArray(payload.integrations)) {
+    throw new Error("invalid HTTPS integration registry");
+  }
+
+  return payload.integrations.map((item: any) => {
+    if (
+      !item
+      || typeof item.id !== "string"
+      || !/^[a-z0-9_-]{1,24}$/.test(item.id)
+      || typeof item.name !== "string"
+      || typeof item.strategy !== "string"
+      || !Array.isArray(item.actions)
+      || !Array.isArray(item.hostSuffixes)
+    ) {
+      throw new Error("invalid HTTPS integration entry");
+    }
+
+    return {
+      id: item.id,
+      name: item.name,
+      description: typeof item.description === "string" ? item.description : "",
+      strategy: item.strategy,
+      status: typeof item.status === "string" ? item.status : "experimental",
+      actions: item.actions.filter((value: unknown) => typeof value === "string"),
+      hostSuffixes: item.hostSuffixes.filter((value: unknown) => typeof value === "string"),
+    };
+  });
+}
+
+function getHttpsIntegration(id: string): HttpsIntegration | undefined {
+  return loadHttpsIntegrations().find(item => item.id === id);
+}
+
+function defaultHttpsRuntimeState(): HttpsRuntimeState {
+  return {
+    active: false,
+    integration: null,
+    mode: "disabled",
+    startedAt: null,
+  };
+}
+
+function loadHttpsRuntimeState(): HttpsRuntimeState {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(httpsRuntimeStateFile, "utf8")) as Partial<HttpsRuntimeState>;
+    return {
+      active: parsed.active === true,
+      integration: typeof parsed.integration === "string" ? parsed.integration : null,
+      mode: typeof parsed.mode === "string" ? parsed.mode : "disabled",
+      startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : null,
+    };
+  } catch {
+    return defaultHttpsRuntimeState();
+  }
+}
+
+async function runHttpsScript(script: string, args: string[] = []): Promise<string> {
+  const hostRepoDir = await resolveHostRepoDir();
+  const { stdout } = await execFileAsync("sh", [script, ...args], {
+    cwd: repoDir,
+    env: {
+      ...process.env,
+      HOST_REPO_DIR: hostRepoDir,
+    },
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  return stdout.trim();
+}
+
+async function httpsFirewallStatus(kind: "interception" | "quic"): Promise<string> {
+  try {
+    const action = kind === "interception" ? "status" : "status";
+    const { stdout } = await execFileAsync(
+      "docker",
+      ["compose", "exec", "-T", "wireguard", "/app/https-firewall.sh", kind, action],
+      { cwd: repoDir, env: process.env },
+    );
+    return stdout.trim() || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function httpsObservationInfo(id: string): { bytes: number; modifiedAt: string | null } {
+  const log = path.join(repoDir, "data", "https", "observations", `${id}.jsonl`);
+  try {
+    const stat = fs.statSync(log);
+    return { bytes: stat.size, modifiedAt: stat.mtime.toISOString() };
+  } catch {
+    return { bytes: 0, modifiedAt: null };
+  }
+}
+
+async function httpsOverview() {
+  const declared = loadHttpsRuntimeState();
+  const [proxyState, interception, quic] = await Promise.all([
+    serviceRuntimeState("https-proxy"),
+    httpsFirewallStatus("interception"),
+    httpsFirewallStatus("quic"),
+  ]);
+
+  const liveActive =
+    declared.active
+    && proxyState === "healthy"
+    && interception === "enabled";
+
+  return {
+    active: liveActive,
+    integration: liveActive ? declared.integration : null,
+    mode: liveActive ? declared.mode : "disabled",
+    startedAt: liveActive ? declared.startedAt : null,
+    staleState: declared.active && !liveActive,
+    proxyState,
+    interception,
+    quic,
+    caReady: fs.existsSync(httpsPublicCaFile),
+  };
+}
+
 async function serviceRuntimeState(service: string): Promise<string> {
   try {
     const { stdout: idOutput } = await execFileAsync(
@@ -512,11 +663,12 @@ app.get("/status", async (request, reply) => {
     currentSha = await localSha();
   } catch {}
 
-  const [dohA, dohB, telegram, wireguard] = await Promise.all([
+  const [dohA, dohB, telegram, wireguard, httpsProxy] = await Promise.all([
     serviceRuntimeState("doh-a"),
     serviceRuntimeState("doh-b"),
     serviceRuntimeState("telegram-bot"),
     serviceRuntimeState("wireguard"),
+    serviceRuntimeState("https-proxy"),
   ]);
 
   const state = liveUpdateState();
@@ -538,6 +690,7 @@ app.get("/status", async (request, reply) => {
       dohB,
       telegram,
       wireguard,
+      httpsProxy,
     },
   };
 });
@@ -564,6 +717,101 @@ app.post("/update", async (request, reply) => {
   } catch (error) {
     return reply.code(500).send({
       error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get("/https/integrations", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+
+  const runtime = await httpsOverview();
+  return {
+    items: loadHttpsIntegrations().map(item => ({
+      ...item,
+      observation: httpsObservationInfo(item.id),
+    })),
+    runtime,
+  };
+});
+
+app.post("/https/ca/prepare", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+
+  const runtime = await httpsOverview();
+  if (runtime.active) {
+    return reply.code(409).send({
+      error: "stop the active HTTPS integration before preparing the CA",
+    });
+  }
+
+  try {
+    const result = await runHttpsScript("scripts/https-ca.sh", ["prepare"]);
+    return {
+      ok: true,
+      result,
+      runtime: await httpsOverview(),
+    };
+  } catch (error) {
+    const safe = safeProcessError(error);
+    return reply.code(500).send({
+      error: safe.stderr || "unable to prepare HTTPS CA",
+    });
+  }
+});
+
+app.get("/https/ca", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+
+  try {
+    const certificate = fs.readFileSync(httpsPublicCaFile);
+    return {
+      filename: "adblock-https-ca.cer",
+      contentType: "application/x-x509-ca-cert",
+      base64: certificate.toString("base64"),
+    };
+  } catch {
+    return reply.code(404).send({
+      error: "HTTPS CA not prepared",
+    });
+  }
+});
+
+app.post("/https/integrations/:id/:action", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+
+  const { id, action } = request.params as { id: string; action: string };
+  const integration = getHttpsIntegration(id);
+  if (!integration) {
+    return reply.code(404).send({ error: "unknown HTTPS integration" });
+  }
+
+  if (action === "stop") {
+    try {
+      await runHttpsScript("scripts/https-runtime.sh", ["stop"]);
+      return { ok: true, runtime: await httpsOverview() };
+    } catch (error) {
+      const safe = safeProcessError(error);
+      return reply.code(500).send({ error: safe.stderr || "unable to stop HTTPS integration" });
+    }
+  }
+
+  if (!["observe", "filter"].includes(action) || !integration.actions.includes(action)) {
+    return reply.code(400).send({ error: "unsupported HTTPS integration action" });
+  }
+
+  if (!fs.existsSync(httpsPublicCaFile)) {
+    return reply.code(409).send({
+      error: "CA not ready: prepare, download, install and trust it before starting inspection",
+    });
+  }
+
+  try {
+    await runHttpsScript("scripts/https-runtime.sh", ["start", id, action]);
+    return { ok: true, runtime: await httpsOverview() };
+  } catch (error) {
+    const safe = safeProcessError(error);
+    return reply.code(500).send({
+      error: safe.stderr || "unable to start HTTPS integration",
     });
   }
 });
