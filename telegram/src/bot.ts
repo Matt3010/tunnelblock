@@ -97,6 +97,7 @@ await bot.setMyCommands([
   { command: "domains", description: "Gestisci domini Allow / Block" },
   { command: "lists", description: "Gestisci blocklist esterne" },
   { command: "vpn", description: "Gestisci utenti VPN" },
+  { command: "integrations", description: "Gestisci integrazioni HTTPS" },
   { command: "topblocked", description: "Domini più bloccati" },
   { command: "topallowed", description: "Domini più richiesti" },
   { command: "update", description: "Aggiorna AdBlock" },
@@ -419,6 +420,129 @@ function topSourceLabel(item: any): string {
   return "⚪ default";
 }
 
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function integrationRuntimeLabel(item: any, runtime: any): string {
+  if (runtime?.active && runtime.integration === item.id) {
+    return `🟢 ${String(runtime.mode ?? "active").toUpperCase()}`;
+  }
+  return "⚪ Inattiva";
+}
+
+async function getIntegrations() {
+  return updaterApi("/https/integrations");
+}
+
+function integrationsHomeView(data: any) {
+  const items = Array.isArray(data.items) ? data.items : [];
+  const runtime = data.runtime ?? {};
+  const rows = items.map((item: any) => ([{
+    text: `${runtime.active && runtime.integration === item.id ? "🟢" : "⚪"} ${item.name}`,
+    callback_data: `integrations:d:${item.id}`,
+  }]));
+
+  rows.push([
+    { text: "🔐 Prepara CA", callback_data: "integrations:ca:prepare" },
+    { text: "📄 Scarica CA", callback_data: "integrations:ca:download" },
+  ]);
+
+  const activeText = runtime.active
+    ? `${runtime.integration} · ${String(runtime.mode ?? "").toUpperCase()}`
+    : "nessuna";
+
+  return {
+    text: [
+      "🧩 Integrazioni HTTPS",
+      `CA: ${runtime.caReady ? "✅ pronta" : "❌ non preparata"}`,
+      `Attiva: ${activeText}`,
+      `Proxy: ${runtime.proxyState ?? "unknown"} · HTTPS: ${runtime.interception ?? "unknown"} · QUIC: ${runtime.quic ?? "unknown"}`,
+      "",
+      items.length
+        ? "Scegli un’integrazione per vedere le azioni disponibili."
+        : "Nessuna integrazione registrata.",
+      "",
+      "La CA è condivisa tra tutte le integrazioni. Dopo averla scaricata, installala su iPhone e abilita la fiducia completa nelle impostazioni certificati.",
+    ].join("\n"),
+    reply_markup: { inline_keyboard: rows },
+  };
+}
+
+function integrationDetailView(item: any, runtime: any) {
+  const activeHere = Boolean(runtime?.active && runtime.integration === item.id);
+  const rows: any[][] = [];
+
+  if (activeHere) {
+    rows.push([{ text: "⏹ Ferma", callback_data: `integrations:a:${item.id}:stop` }]);
+  } else {
+    if (Array.isArray(item.actions) && item.actions.includes("observe")) {
+      rows.push([{ text: "👁 Avvia osservazione", callback_data: `integrations:a:${item.id}:observe` }]);
+    }
+    if (Array.isArray(item.actions) && item.actions.includes("filter")) {
+      rows.push([{ text: "🛡 Avvia filtro", callback_data: `integrations:a:${item.id}:filter` }]);
+    }
+  }
+
+  rows.push([{ text: "🔄 Aggiorna stato", callback_data: `integrations:d:${item.id}` }]);
+  rows.push([{ text: "⬅️ Integrazioni", callback_data: "integrations:home" }]);
+
+  const observation = item.observation ?? {};
+  const modifiedAt = observation.modifiedAt
+    ? new Date(observation.modifiedAt).toLocaleString("it-IT")
+    : "mai";
+
+  return {
+    text: [
+      `🧩 ${item.name}`,
+      integrationRuntimeLabel(item, runtime),
+      "",
+      item.description ?? "",
+      "",
+      `Stato strategia: ${item.status ?? "experimental"}`,
+      `Azioni: ${Array.isArray(item.actions) && item.actions.length ? item.actions.join(", ") : "nessuna"}`,
+      `CA: ${runtime?.caReady ? "✅ pronta" : "❌ non preparata"}`,
+      `Log osservazione: ${formatBytes(Number(observation.bytes ?? 0))} · ultimo aggiornamento: ${modifiedAt}`,
+      "",
+      activeHere
+        ? "L’intercettazione HTTPS è attiva sul traffico del dispositivo. Ferma la sessione appena terminato il test."
+        : runtime?.caReady
+          ? "Prima dell’avvio verifica che la CA sia installata e considerata attendibile da iOS."
+          : "Prepara e installa prima la CA dal menu Integrazioni.",
+    ].join("\n"),
+    reply_markup: { inline_keyboard: rows },
+  };
+}
+
+async function editIntegrationsHome(chatId: number, messageId: number) {
+  const data = await getIntegrations();
+  const view = integrationsHomeView(data);
+  await bot.editMessageText(view.text, {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: view.reply_markup,
+  });
+}
+
+async function editIntegrationDetail(chatId: number, messageId: number, id: string) {
+  const data = await getIntegrations();
+  const item = (data.items ?? []).find((candidate: any) => candidate.id === id);
+  if (!item) {
+    await editIntegrationsHome(chatId, messageId);
+    return;
+  }
+  const view = integrationDetailView(item, data.runtime);
+  await bot.editMessageText(view.text, {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: view.reply_markup,
+  });
+}
+
+
 function helpText(): string {
   return [
     "AdBlock bot commands:",
@@ -427,6 +551,7 @@ function helpText(): string {
     "/domains",
     "/lists",
     "/vpn",
+    "/integrations",
     "/topblocked",
     "/topallowed",
     "/reload",
@@ -449,6 +574,58 @@ bot.on("callback_query", async query => {
   }
 
   try {
+    if (data === "integrations:home") {
+      await editIntegrationsHome(chatId, messageId);
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === "integrations:ca:prepare") {
+      await bot.answerCallbackQuery(query.id, { text: "Preparazione CA…" });
+      await updaterApi("/https/ca/prepare", { method: "POST", body: "{}" });
+      await editIntegrationsHome(chatId, messageId);
+      return;
+    }
+
+    if (data === "integrations:ca:download") {
+      const result = await updaterApi("/https/ca");
+      const sent = await bot.sendDocument(
+        chatId,
+        Buffer.from(result.base64, "base64"),
+        {
+          caption: "CA HTTPS AdBlock. Installala sul dispositivo di test e abilita la fiducia completa in iOS prima di avviare un’integrazione.",
+        },
+        {
+          filename: result.filename ?? "adblock-https-ca.cer",
+          contentType: result.contentType ?? "application/x-x509-ca-cert",
+        },
+      );
+      trackMessage(sent.chat.id, sent.message_id);
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const integrationDetail = data.match(/^integrations:d:([a-z0-9_-]{1,24})$/);
+    if (integrationDetail) {
+      await editIntegrationDetail(chatId, messageId, integrationDetail[1]);
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const integrationAction = data.match(/^integrations:a:([a-z0-9_-]{1,24}):(observe|filter|stop)$/);
+    if (integrationAction) {
+      const [, id, action] = integrationAction;
+      await bot.answerCallbackQuery(query.id, {
+        text: action === "stop" ? "Arresto integrazione…" : "Avvio integrazione…",
+      });
+      await updaterApi(`/https/integrations/${id}/${action}`, {
+        method: "POST",
+        body: "{}",
+      });
+      await editIntegrationDetail(chatId, messageId, id);
+      return;
+    }
+
     if (data === "vpn:home") { pendingPeerAdd.delete(chatId); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id); return; }
     if (data === "vpn:add") { pendingPeerAdd.set(chatId, messageId); await bot.editMessageText("➕ Nuovo utente VPN\n\nInvia un nome (lettere, numeri, _ o -).", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: "❌ Annulla", callback_data: "vpn:home" }]] } }); await bot.answerCallbackQuery(query.id); return; }
     const vpnDetail = data.match(/^vpn:d:([A-Za-z0-9_-]{1,32})$/);
@@ -758,6 +935,7 @@ bot.on("message", async msg => {
             `doh-a: ${updaterResult.value.services.dohA ?? "unknown"}`,
             `doh-b: ${updaterResult.value.services.dohB ?? "unknown"}`,
             `wireguard: ${updaterResult.value.services.wireguard ?? "unknown"}`,
+            `https-proxy: ${updaterResult.value.services.httpsProxy ?? "stopped"}`,
             `bot: ${updaterResult.value.services.telegram ?? "unknown"}`,
           ]
         : [];
@@ -803,6 +981,13 @@ bot.on("message", async msg => {
 
     if (text === "/vpn") {
       pendingPeerAdd.delete(chatId); const view = await vpnView(); await sendTrackedMessage(chatId, view.text, { reply_markup: view.reply_markup }); return;
+    }
+
+    if (text === "/integrations" || text === "/integrazioni") {
+      const data = await getIntegrations();
+      const view = integrationsHomeView(data);
+      await sendTrackedMessage(chatId, view.text, { reply_markup: view.reply_markup });
+      return;
     }
 
     if (text === "/topblocked") {
