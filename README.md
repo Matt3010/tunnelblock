@@ -74,7 +74,7 @@ The VPN provides:
 
 Normal filtering remains DNS-based. An opt-in HTTPS integration lab can temporarily intercept TLS traffic for registered application strategies; it is stopped by default and managed from Telegram.
 
-Use `/integrations` in the Telegram bot to prepare/download the private CA, select a registered app strategy and start or stop an observation session. The first registered strategy is Instagram and is observation-only.
+Use `/integrations` in the Telegram bot to manage registered app strategies and observation sessions. The registry is currently empty. Only the public CA certificate can be downloaded; its private key never leaves the Raspberry Pi.
 
 See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup and VPN verification, and [docs/HTTPS-INTEGRATIONS.md](docs/HTTPS-INTEGRATIONS.md) for the HTTPS strategy architecture and safety model.
 
@@ -92,3 +92,8 @@ The updater watches `master`. A deployment runs the current `ops/deploy.sh`, whi
 8. rolls back to the previous SHA if deployment fails.
 
 Persistent data is not reset during this process.
+
+## License
+
+This project is open source under the [MIT License](LICENSE). You may use,
+modify and redistribute it subject to the license notice.

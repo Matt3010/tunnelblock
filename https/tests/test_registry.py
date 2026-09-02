@@ -24,8 +24,16 @@ class StrategyRegistryTest(unittest.TestCase):
         value.update(changes)
         return value
 
-    def test_load_and_instagram_hosts(self):
-        strategy = StrategyRegistry("/app/integrations.json").get("instagram")
+    def test_empty_project_registry_loads(self):
+        self.assertEqual(StrategyRegistry("/app/integrations.json").all(), ())
+
+    def test_instagram_strategy_remains_available_but_unregistered(self):
+        registry = StrategyRegistry(self.write_registry([self.entry(
+            id="instagram",
+            strategy="app.strategies.instagram:InstagramStrategy",
+            hostSuffixes=["instagram.com", "cdninstagram.com", "facebook.com", "facebook.net", "fbcdn.net", "fbsbx.com"],
+        )]))
+        strategy = registry.get("instagram")
         for host in ("i.instagram.com", "cdninstagram.com", "graph.facebook.com", "connect.facebook.net", "x.fbcdn.net", "fbsbx.com"):
             self.assertTrue(strategy.matches_host(host), host)
         self.assertFalse(strategy.matches_host("example.com"))

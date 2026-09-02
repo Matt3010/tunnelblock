@@ -22,7 +22,6 @@ wireguard network namespace
                                       |
                                       +--> strategy registry
                                              |
-                                             +--> instagram
                                              +--> future integrations
 ```
 
@@ -55,17 +54,8 @@ each integration returns the same public certificate for convenience.
 
 Initial workflow:
 
-1. open Instagram and tap **Certificato CA**;
-2. install the received `adblock-general-purpose-ca.cer` profile;
-3. in iOS enable full trust for that CA under Certificate Trust Settings;
-4. tap **Avvia ispezione**;
-5. use Instagram briefly;
-6. tap **Risultati TLS/HTTP** and read the cautious interpretation;
-7. tap **Ferma ispezione**.
-
-The first Instagram strategy is observation-only. It records minimized TLS/HTTP metadata
-for matching Meta/Instagram hosts and never stores headers, cookies, query strings,
-request bodies or response bodies.
+The registry is currently empty. Once an integration is registered, its menu provides
+CA download, start/stop, minimized TLS/HTTP results and integration-scoped clearing.
 
 ## Runtime data
 
@@ -80,7 +70,7 @@ data/https/
   public/
     adblock-general-purpose-ca.cer
   observations/
-    instagram.jsonl
+    <integration-id>.jsonl
 ```
 
 Only `data/https/public/adblock-general-purpose-ca.cer` is returned by the authenticated updater
@@ -105,10 +95,10 @@ Create an `AppStrategy` subclass under `https/app/strategies/`, register its imp
 host suffixes and action metadata in `https/integrations.json`, then add host/behavior
 tests. No WireGuard, firewall, CA, Compose, updater or Telegram change is required.
 
-## Reading the Instagram result
+## Reading an observation result
 
 Visible HTTP requests prove that HTTPS was readable for at least part of the selected
 traffic. ClientHello plus TLS failures, with no established client TLS and no visible
 HTTP requests, is only *compatible* with certificate pinning or CA rejection; it is not
-proof. **Azzera risultati** removes only Instagram observation files, never CA, VPN,
+proof. **Azzera risultati** removes only that integration's observation files, never CA, VPN,
 DNS statistics or another integration.

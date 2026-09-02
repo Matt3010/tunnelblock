@@ -1,27 +1,4 @@
 {
   "version": 1,
-  "integrations": [
-    {
-      "id": "instagram",
-      "name": "Instagram",
-      "description": "Osservazione HTTPS dell'app ufficiale Instagram per validare TLS e identificare traffico pubblicitario.",
-      "strategy": "app.strategies.instagram:InstagramStrategy",
-      "status": "experimental",
-      "actions": [
-        { "id": "certificate", "label": "🔐 Certificato CA", "kind": "certificate", "visibleWhen": "always" },
-        { "id": "start", "label": "▶️ Avvia ispezione", "kind": "start", "visibleWhen": "inactive" },
-        { "id": "stop", "label": "⏹ Ferma ispezione", "kind": "stop", "visibleWhen": "active" },
-        { "id": "summary", "label": "📊 Risultati TLS/HTTP", "kind": "summary", "visibleWhen": "always" },
-        { "id": "clear", "label": "🧹 Azzera risultati", "kind": "clear", "visibleWhen": "always" }
-      ],
-      "hostSuffixes": [
-        "instagram.com",
-        "cdninstagram.com",
-        "facebook.com",
-        "facebook.net",
-        "fbcdn.net",
-        "fbsbx.com"
-      ]
-    }
-  ]
+  "integrations": []
 }

@@ -2,7 +2,8 @@ import unittest
 
 from app.main import _safe_path
 from app.models import HttpContext
-from app.registry import StrategyRegistry
+from app.strategies.base import StrategyConfig
+from app.strategies.instagram import InstagramStrategy
 
 
 class FrameworkTest(unittest.TestCase):
@@ -11,7 +12,10 @@ class FrameworkTest(unittest.TestCase):
         self.assertEqual(_safe_path("/api/abcdefghijklmnopqrstuvwxyz0123456789"), "/api/<redacted>")
 
     def test_streaming_defaults_and_no_mutation(self):
-        strategy = StrategyRegistry("/app/integrations.json").get("instagram")
+        strategy = InstagramStrategy(StrategyConfig(
+            id="instagram", name="Instagram", description="test", status="experimental",
+            actions=(), host_suffixes=("instagram.com",),
+        ))
         self.assertEqual(strategy.request_body_mode, "stream")
         self.assertEqual(strategy.response_body_mode, "stream")
         context = HttpContext("instagram", "i.instagram.com", "GET", "/feed", "https", 443)
