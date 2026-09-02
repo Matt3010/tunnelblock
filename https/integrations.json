@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "integrations": [
+    {
+      "id": "instagram",
+      "name": "Instagram",
+      "description": "Osservazione HTTPS dell'app ufficiale Instagram per validare TLS e identificare traffico pubblicitario.",
+      "strategy": "instagram",
+      "status": "experimental",
+      "actions": ["observe"],
+      "hostSuffixes": [
+        "instagram.com",
+        "cdninstagram.com",
+        "facebook.com",
+        "fbcdn.net",
+        "fbsbx.com"
+      ]
+    }
+  ]
+}
