@@ -1,6 +1,7 @@
 FROM mitmproxy/mitmproxy:12.2.3@sha256:00b77b5d8804c8ad18cb6caefbf9d5849e895e8986c5ce011f4ae30f4385962f
 
 WORKDIR /app
+ENV PYTHONPATH=/app
 
 COPY https/integrations.json /app/integrations.json
 COPY https/app /app/app
