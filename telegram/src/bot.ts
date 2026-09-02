@@ -92,17 +92,17 @@ async function cleanupTrackedMessages() {
 }
 
 await bot.setMyCommands([
-  { command: "status", description: "Stato del resolver VPN" },
-  { command: "diag", description: "Diagnostica resolver e storage" },
-  { command: "domains", description: "Gestisci domini Allow / Block" },
-  { command: "lists", description: "Gestisci blocklist esterne" },
-  { command: "vpn", description: "Gestisci utenti VPN" },
-  { command: "integrations", description: "Gestisci integrazioni HTTPS" },
-  { command: "topblocked", description: "Domini più bloccati" },
-  { command: "topallowed", description: "Domini più richiesti" },
-  { command: "update", description: "Aggiorna AdBlock" },
-  { command: "update_status", description: "Stato aggiornamento" },
-  { command: "help", description: "Mostra i comandi" },
+  { command: "status", description: "VPN resolver status" },
+  { command: "diag", description: "Resolver and storage diagnostics" },
+  { command: "domains", description: "Manage Allow / Block domains" },
+  { command: "lists", description: "Manage external blocklists" },
+  { command: "vpn", description: "Manage VPN users" },
+  { command: "integrations", description: "Manage HTTPS integrations" },
+  { command: "topblocked", description: "Most blocked domains" },
+  { command: "topallowed", description: "Most requested domains" },
+  { command: "update", description: "Update TunnelBlock" },
+  { command: "update_status", description: "Update status" },
+  { command: "help", description: "Show commands" },
 ]);
 
 function isAllowed(userId?: number): boolean {
@@ -200,14 +200,14 @@ function domainsListView(data: any) {
   rows.push(nav);
 
   return {
-    text: `🌐 Domini osservati\n${data.total} domini · pagina ${data.page + 1}/${data.pageCount}\n\nTocca un dominio per gestirlo.`,
+    text: `🌐 Observed domains\n${data.total} domains · page ${data.page + 1}/${data.pageCount}\n\nTap a domain to manage it.`,
     reply_markup: { inline_keyboard: rows },
   };
 }
 
 function domainStateLabel(state: string): string {
-  if (state === "allow") return "Allow manuale";
-  if (state === "block") return "Block manuale";
+  if (state === "allow") return "Manual allow";
+  if (state === "block") return "Manual block";
   if (state === "list") return "Blocklist";
   return "Default";
 }
@@ -217,12 +217,12 @@ function domainDetailView(item: any, page: number) {
     `${stateIcon(item.state)} ${item.domain}`,
     "",
     `Query: ${item.count}`,
-    `Decisione DNS: ${item.decision === "block" ? "🚫 BLOCK" : "✅ ALLOW"}`,
-    `Origine: ${domainStateLabel(item.state)}`,
+    `DNS decision: ${item.decision === "block" ? "🚫 BLOCK" : "✅ ALLOW"}`,
+    `Source: ${domainStateLabel(item.state)}`,
   ];
 
   if (item.matchedRule) {
-    lines.push(`Regola effettiva: ${item.matchedRule}`);
+    lines.push(`Effective rule: ${item.matchedRule}`);
   }
 
   const matchingLists = Array.isArray(item.blocklists)
@@ -234,8 +234,8 @@ function domainDetailView(item: any, page: number) {
   if (matchingLists.length) {
     lines.push(
       item.state === "list"
-        ? `Blocklist corrispondenti: ${matchingLists.length}`
-        : `Presente anche in ${matchingLists.length} blocklist:`,
+        ? `Matching blocklists: ${matchingLists.length}`
+        : `Also present in ${matchingLists.length} blocklists:`,
     );
 
     for (const match of matchingLists.slice(0, 5)) {
@@ -245,7 +245,7 @@ function domainDetailView(item: any, page: number) {
     }
 
     if (matchingLists.length > 5) {
-      lines.push(`• … altre ${matchingLists.length - 5}`);
+      lines.push(`• … ${matchingLists.length - 5} more`);
     }
   }
 
@@ -258,7 +258,7 @@ function domainDetailView(item: any, page: number) {
           { text: "✅ Allow", callback_data: `domains:r:allow:${item.key}:${page}` },
           { text: "🚫 Block", callback_data: `domains:r:block:${item.key}:${page}` },
         ],
-        [{ text: "⬅️ Torna alla lista", callback_data: `domains:p:${page}` }],
+        [{ text: "⬅️ Back to domains", callback_data: `domains:p:${page}` }],
       ],
     },
   };
@@ -292,8 +292,8 @@ async function vpnView() {
     text: `${peer.enabled ? "✅" : "⏸"} ${peer.name} · ${peer.ipv4}`,
     callback_data: `vpn:d:${peer.name}`,
   }]));
-  rows.push([{ text: "➕ Nuovo utente", callback_data: "vpn:add" }]);
-  return { text: `👥 Utenti VPN\n${peers.length} configurati`, reply_markup: { inline_keyboard: rows } };
+  rows.push([{ text: "➕ New user", callback_data: "vpn:add" }]);
+  return { text: `👥 VPN users\n${peers.length} configured`, reply_markup: { inline_keyboard: rows } };
 }
 
 async function editVpnHome(chatId: number, messageId: number) {
@@ -313,9 +313,9 @@ function shortListName(urlValue: string): string {
 }
 
 function formatListDate(value: string | null): string {
-  if (!value) return "mai";
+  if (!value) return "never";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("it-IT");
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-GB");
 }
 
 async function getLists() {
@@ -330,8 +330,8 @@ function listsView(data: any) {
   }]));
 
   rows.push([
-    { text: "➕ Aggiungi", callback_data: "lists:add" },
-    { text: "🔄 Aggiorna tutte", callback_data: "lists:refresh" },
+    { text: "➕ Add", callback_data: "lists:add" },
+    { text: "🔄 Refresh all", callback_data: "lists:refresh" },
   ]);
 
   const activeCount = Number(data.activeCount ?? items.filter((item: any) => item.enabled).length);
@@ -340,13 +340,13 @@ function listsView(data: any) {
 
   return {
     text: [
-      "📚 Blocklist esterne",
-      `${activeCount}/${items.length} attive · ${data.combinedDomainCount ?? 0} domini unici`,
-      `Overlap: ${duplicateEntries} voci duplicate${unhealthyCount ? ` · ⚠️ ${unhealthyCount} con errore` : ""}`,
+      "📚 External blocklists",
+      `${activeCount}/${items.length} active · ${data.combinedDomainCount ?? 0} unique domains`,
+      `Overlap: ${duplicateEntries} duplicate entries${unhealthyCount ? ` · ⚠️ ${unhealthyCount} with errors` : ""}`,
       "",
       items.length
-        ? "Tocca una lista per copertura, overlap e stato."
-        : "Nessuna lista configurata. Il blocco resta solo manuale.",
+        ? "Tap a list to inspect coverage, overlap and status."
+        : "No blocklist configured. Only manual blocking remains active.",
     ].join("\n"),
     reply_markup: { inline_keyboard: rows },
   };
@@ -355,37 +355,37 @@ function listsView(data: any) {
 function listDetailView(item: any) {
   const coverage = item.enabled
     ? [
-        `Domini cache: ${item.cachedDomainCount ?? item.domainCount}`,
-        `Unici a questa lista: ${item.uniqueDomainCount ?? 0}`,
-        `Sovrapposti ad altre liste: ${item.overlapDomainCount ?? 0}`,
+        `Cached domains: ${item.cachedDomainCount ?? item.domainCount}`,
+        `Unique to this list: ${item.uniqueDomainCount ?? 0}`,
+        `Shared with other lists: ${item.overlapDomainCount ?? 0}`,
       ]
     : [
-        `Domini cache: ${item.cachedDomainCount ?? item.domainCount}`,
-        "Copertura attiva: disabilitata",
+        `Cached domains: ${item.cachedDomainCount ?? item.domainCount}`,
+        "Active coverage: disabled",
       ];
 
   return {
     text: [
-      `${item.lastError ? "⚠️" : item.enabled ? "✅" : "⏸"} ${item.enabled ? "Attiva" : "Disabilitata"}`,
+      `${item.lastError ? "⚠️" : item.enabled ? "✅" : "⏸"} ${item.enabled ? "Active" : "Disabled"}`,
       shortListName(item.url),
       "",
       item.url,
       "",
       ...coverage,
-      `Ultimo aggiornamento: ${formatListDate(item.updatedAt)}`,
-      item.lastError ? `Ultimo errore: ${item.lastError}` : "Stato: OK",
+      `Last update: ${formatListDate(item.updatedAt)}`,
+      item.lastError ? `Last error: ${item.lastError}` : "Status: OK",
     ].join("\n"),
     reply_markup: {
       inline_keyboard: [
         [
           {
-            text: item.enabled ? "⏸ Disabilita" : "▶️ Abilita",
+            text: item.enabled ? "⏸ Disable" : "▶️ Enable",
             callback_data: `lists:e:${item.id}:${item.enabled ? 0 : 1}`,
           },
-          { text: "🔄 Aggiorna", callback_data: `lists:r:${item.id}` },
+          { text: "🔄 Refresh", callback_data: `lists:r:${item.id}` },
         ],
-        [{ text: "🗑 Rimuovi", callback_data: `lists:c:${item.id}` }],
-        [{ text: "⬅️ Torna alle liste", callback_data: "lists:home" }],
+        [{ text: "🗑 Remove", callback_data: `lists:c:${item.id}` }],
+        [{ text: "⬅️ Back to lists", callback_data: "lists:home" }],
       ],
     },
   };
@@ -431,7 +431,7 @@ function integrationRuntimeLabel(item: any, runtime: any): string {
   if (runtime?.active && runtime.integration === item.id) {
     return `🟢 ${String(runtime.mode ?? "active").toUpperCase()}`;
   }
-  return "⚪ Inattiva";
+  return "⚪ Inactive";
 }
 
 async function getIntegrations() {
@@ -448,20 +448,20 @@ function integrationsHomeView(data: any) {
 
   const activeText = runtime.active
     ? `${runtime.integration} · ${String(runtime.mode ?? "").toUpperCase()}`
-    : "nessuna";
+    : "none";
 
   return {
     text: [
-      "🧩 Integrazioni HTTPS",
-      `CA: ${runtime.caReady ? "✅ pronta" : "❌ non preparata"}`,
-      `Attiva: ${activeText}`,
+      "🧩 HTTPS integrations",
+      `CA: ${runtime.caReady ? "✅ ready" : "❌ not prepared"}`,
+      `Active: ${activeText}`,
       `Proxy: ${runtime.proxyState ?? "unknown"} · HTTPS: ${runtime.interception ?? "unknown"} · QUIC: ${runtime.quic ?? "unknown"}`,
       "",
       items.length
-        ? "Scegli un’integrazione per vedere le azioni disponibili."
-        : "Nessuna integrazione registrata.",
+        ? "Choose an integration to view its available actions."
+        : "No integrations registered.",
       "",
-      "La CA è condivisa tra tutte le integrazioni. Installala solo per test HTTPS espliciti: non serve al blocco DNS. Ogni app può comunque rifiutare le CA aggiunte dall’utente.",
+      "The CA is shared by all integrations. Install it only for explicit HTTPS tests: DNS blocking does not need it. Applications may reject user-added CAs.",
     ].join("\n"),
     reply_markup: { inline_keyboard: rows },
   };
@@ -476,12 +476,12 @@ function integrationDetailView(item: any, runtime: any) {
     if (action.visibleWhen === "inactive" && activeHere) continue;
     rows.push([{ text: action.label, callback_data: `integrations:a:${item.id}:${action.id}` }]);
   }
-  rows.push([{ text: "⬅️ Integrazioni", callback_data: "integrations:home" }]);
+  rows.push([{ text: "⬅️ Integrations", callback_data: "integrations:home" }]);
 
   const observation = item.observation ?? {};
   const modifiedAt = observation.modifiedAt
     ? new Date(observation.modifiedAt).toLocaleString("it-IT")
-    : "mai";
+    : "never";
 
   return {
     text: [
@@ -490,15 +490,15 @@ function integrationDetailView(item: any, runtime: any) {
       "",
       item.description ?? "",
       "",
-      `Stato strategia: ${item.status ?? "experimental"}`,
-      `CA: ${runtime?.caReady ? "✅ pronta" : "❌ non preparata"}`,
-      `Log osservazione: ${formatBytes(Number(observation.bytes ?? 0))} · ultimo aggiornamento: ${modifiedAt}`,
+      `Strategy status: ${item.status ?? "experimental"}`,
+      `CA: ${runtime?.caReady ? "✅ ready" : "❌ not prepared"}`,
+      `Observation log: ${formatBytes(Number(observation.bytes ?? 0))} · last update: ${modifiedAt}`,
       "",
       activeHere
-        ? "L’intercettazione HTTPS è attiva sul traffico del dispositivo. Ferma la sessione appena terminato il test."
+        ? "HTTPS inspection is active for this device. Stop the session as soon as the test is complete."
         : runtime?.caReady
-          ? "Prima dell’avvio verifica che la CA sia installata e attendibile sul dispositivo di test."
-          : "Prepara e installa prima la CA dal menu Integrazioni.",
+          ? "Before starting, verify that the CA is installed and trusted on the test device."
+          : "Prepare and install the CA from the Integrations menu first.",
     ].join("\n"),
     reply_markup: { inline_keyboard: rows },
   };
@@ -506,14 +506,14 @@ function integrationDetailView(item: any, runtime: any) {
 
 function httpsSummaryText(name: string, summary: any): string {
   const interpretation = Number(summary.httpRequests) > 0
-    ? "✅ HTTPS leggibile almeno per parte del traffico."
+    ? "✅ HTTPS was readable for at least part of the traffic."
     : summary.likelyCertificatePinning
-      ? "⚠️ Risultato compatibile con certificate pinning / rifiuto della CA."
-      : "ℹ️ Dati insufficienti per valutare l’intercettazione TLS.";
+      ? "⚠️ Result compatible with certificate pinning or CA rejection."
+      : "ℹ️ Not enough data to evaluate TLS inspection.";
   return [`📊 ${name}`, "", `TLS ClientHello: ${summary.tlsClientHello ?? 0}`,
-    `TLS stabiliti: ${summary.tlsEstablished ?? 0}`, `TLS falliti: ${summary.tlsFailed ?? 0}`, "",
-    `HTTP request visibili: ${summary.httpRequests ?? 0}`, `HTTP response visibili: ${summary.httpResponses ?? 0}`, "",
-    `Host HTTPS distinti: ${summary.uniqueHosts ?? 0}`, "", interpretation].join("\n");
+    `TLS established: ${summary.tlsEstablished ?? 0}`, `TLS failed: ${summary.tlsFailed ?? 0}`, "",
+    `Visible HTTP requests: ${summary.httpRequests ?? 0}`, `Visible HTTP responses: ${summary.httpResponses ?? 0}`, "",
+    `Distinct HTTPS hosts: ${summary.uniqueHosts ?? 0}`, "", interpretation].join("\n");
 }
 
 async function editIntegrationsHome(chatId: number, messageId: number) {
@@ -544,7 +544,7 @@ async function editIntegrationDetail(chatId: number, messageId: number, id: stri
 
 function helpText(): string {
   return [
-    "AdBlock bot commands:",
+    "TunnelBlock bot commands:",
     "/status",
     "/diag",
     "/domains",
@@ -589,7 +589,7 @@ bot.on("callback_query", async query => {
     const integrationAction = data.match(/^integrations:a:([a-z0-9_-]{1,24}):([a-z0-9_-]{1,24})$/);
     if (integrationAction) {
       const [, id, action] = integrationAction;
-      await bot.answerCallbackQuery(query.id, { text: "Operazione in corso…" });
+      await bot.answerCallbackQuery(query.id, { text: "Operation in progress…" });
       const result = await updaterApi(`/integrations/${id}/actions/${action}`, {
         method: "POST",
         body: "{}",
@@ -597,7 +597,7 @@ bot.on("callback_query", async query => {
       if (result.certificate) {
         const certificate = result.certificate;
         const sent = await bot.sendDocument(chatId, Buffer.from(certificate.base64, "base64"), {
-          caption: `CA HTTPS AdBlock\nSHA-256: ${certificate.fingerprint256}\n\nImpostazioni → Generali → Info → Impostazioni attendibilità certificati → abilita attendibilità completa.`,
+          caption: `TunnelBlock HTTPS CA\nSHA-256: ${certificate.fingerprint256}\n\nInstall and trust this certificate only on a dedicated test device. It is not required for DNS blocking.`,
         }, { filename: certificate.filename, contentType: certificate.contentType });
         trackMessage(sent.chat.id, sent.message_id);
       }
@@ -611,21 +611,21 @@ bot.on("callback_query", async query => {
     }
 
     if (data === "vpn:home") { pendingPeerAdd.delete(chatId); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id); return; }
-    if (data === "vpn:add") { pendingPeerAdd.set(chatId, messageId); await bot.editMessageText("➕ Nuovo utente VPN\n\nInvia un nome (lettere, numeri, _ o -).", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: "❌ Annulla", callback_data: "vpn:home" }]] } }); await bot.answerCallbackQuery(query.id); return; }
+    if (data === "vpn:add") { pendingPeerAdd.set(chatId, messageId); await bot.editMessageText("➕ New VPN user\n\nSend a name using letters, numbers, _ or -.", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "vpn:home" }]] } }); await bot.answerCallbackQuery(query.id); return; }
     const vpnDetail = data.match(/^vpn:d:([A-Za-z0-9_-]{1,32})$/);
-    if (vpnDetail) { const peers = await updaterApi("/vpn/peers"); const peer = peers.find((p: any) => p.name === vpnDetail[1]); if (!peer) { await editVpnHome(chatId, messageId); return; } const last = peer.handshake ? new Date(peer.handshake * 1000).toLocaleString("it-IT") : "mai"; await bot.editMessageText(`👤 ${peer.name}\nStato: ${peer.enabled ? "abilitato" : "disabilitato"}\nIP: ${peer.ipv4}\nUltimo accesso: ${last}\nTraffico: ↓ ${peer.rx} B · ↑ ${peer.tx} B`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: peer.enabled ? "⏸ Disabilita" : "▶️ Abilita", callback_data: `vpn:e:${peer.name}:${peer.enabled ? 0 : 1}` }], [{ text: "📷 Mostra QR", callback_data: `vpn:g:${peer.name}` }, { text: "📄 Config", callback_data: `vpn:c:${peer.name}` }], [{ text: "🔑 Rigenera", callback_data: `vpn:r:${peer.name}` }, { text: "🗑 Elimina", callback_data: `vpn:q:${peer.name}` }], [{ text: "⬅️ Utenti", callback_data: "vpn:home" }]] } }); await bot.answerCallbackQuery(query.id); return; }
+    if (vpnDetail) { const peers = await updaterApi("/vpn/peers"); const peer = peers.find((p: any) => p.name === vpnDetail[1]); if (!peer) { await editVpnHome(chatId, messageId); return; } const last = peer.handshake ? new Date(peer.handshake * 1000).toLocaleString("en-GB") : "never"; await bot.editMessageText(`👤 ${peer.name}\nStatus: ${peer.enabled ? "enabled" : "disabled"}\nIP: ${peer.ipv4}\nLast handshake: ${last}\nTraffic: ↓ ${peer.rx} B · ↑ ${peer.tx} B`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: peer.enabled ? "⏸ Disable" : "▶️ Enable", callback_data: `vpn:e:${peer.name}:${peer.enabled ? 0 : 1}` }], [{ text: "📷 Show QR", callback_data: `vpn:g:${peer.name}` }, { text: "📄 Config", callback_data: `vpn:c:${peer.name}` }], [{ text: "🔑 Rotate keys", callback_data: `vpn:r:${peer.name}` }, { text: "🗑 Delete", callback_data: `vpn:q:${peer.name}` }], [{ text: "⬅️ Users", callback_data: "vpn:home" }]] } }); await bot.answerCallbackQuery(query.id); return; }
     const vpnEnable = data.match(/^vpn:e:([A-Za-z0-9_-]{1,32}):(0|1)$/);
-    if (vpnEnable) { await updaterApi(`/vpn/peers/${vpnEnable[1]}/${vpnEnable[2] === "1" ? "enable" : "disable"}`, { method: "POST", body: "{}" }); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id, { text: "Stato aggiornato" }); return; }
+    if (vpnEnable) { await updaterApi(`/vpn/peers/${vpnEnable[1]}/${vpnEnable[2] === "1" ? "enable" : "disable"}`, { method: "POST", body: "{}" }); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id, { text: "Status updated" }); return; }
     const vpnConfig = data.match(/^vpn:c:([A-Za-z0-9_-]{1,32})$/);
     if (vpnConfig) { const result = await updaterApi(`/vpn/peers/${vpnConfig[1]}/config`); const sent = await bot.sendDocument(chatId, Buffer.from(result.config), {}, { filename: `${vpnConfig[1]}.conf`, contentType: "text/plain" }); trackMessage(sent.chat.id, sent.message_id); await bot.answerCallbackQuery(query.id); return; }
     const vpnQr = data.match(/^vpn:g:([A-Za-z0-9_-]{1,32})$/);
     if (vpnQr) { const result = await updaterApi(`/vpn/peers/${vpnQr[1]}/qr`); const sent = await bot.sendPhoto(chatId, Buffer.from(result.pngBase64, "base64"), { caption: `QR WireGuard · ${vpnQr[1]}` }, { filename: `${vpnQr[1]}.png`, contentType: "image/png" }); trackMessage(sent.chat.id, sent.message_id); await bot.answerCallbackQuery(query.id); return; }
     const vpnRotate = data.match(/^vpn:r:([A-Za-z0-9_-]{1,32})$/);
-    if (vpnRotate) { await updaterApi(`/vpn/peers/${vpnRotate[1]}/rotate`, { method: "POST", body: "{}" }); await bot.answerCallbackQuery(query.id, { text: "Chiavi rigenerate: scarica la nuova config", show_alert: true }); return; }
+    if (vpnRotate) { await updaterApi(`/vpn/peers/${vpnRotate[1]}/rotate`, { method: "POST", body: "{}" }); await bot.answerCallbackQuery(query.id, { text: "Keys rotated: download the new configuration", show_alert: true }); return; }
     const vpnConfirm = data.match(/^vpn:q:([A-Za-z0-9_-]{1,32})$/);
-    if (vpnConfirm) { await bot.editMessageText(`Eliminare definitivamente ${vpnConfirm[1]}?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: "🗑 Conferma", callback_data: `vpn:x:${vpnConfirm[1]}` }], [{ text: "Annulla", callback_data: `vpn:d:${vpnConfirm[1]}` }]] } }); await bot.answerCallbackQuery(query.id); return; }
+    if (vpnConfirm) { await bot.editMessageText(`Permanently delete ${vpnConfirm[1]}?`, { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [[{ text: "🗑 Confirm", callback_data: `vpn:x:${vpnConfirm[1]}` }], [{ text: "Cancel", callback_data: `vpn:d:${vpnConfirm[1]}` }]] } }); await bot.answerCallbackQuery(query.id); return; }
     const vpnDelete = data.match(/^vpn:x:([A-Za-z0-9_-]{1,32})$/);
-    if (vpnDelete) { await updaterApi(`/vpn/peers/${vpnDelete[1]}`, { method: "DELETE" }); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id, { text: "Utente eliminato" }); return; }
+    if (vpnDelete) { await updaterApi(`/vpn/peers/${vpnDelete[1]}`, { method: "DELETE" }); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id, { text: "User deleted" }); return; }
     if (data === "lists:home") {
       await editListsHome(chatId, messageId);
       await bot.answerCallbackQuery(query.id);
@@ -635,13 +635,13 @@ bot.on("callback_query", async query => {
     if (data === "lists:add") {
       pendingListAdd.set(chatId, messageId);
       await bot.editMessageText(
-        "➕ Aggiungi blocklist\n\nInviami ora l’URL HTTPS della lista.\nSono supportati domini semplici, file hosts e sintassi Adblock ||domain^.",
+        "➕ Add blocklist\n\nSend the HTTPS URL of the list.\nPlain domains, hosts files and Adblock ||domain^ syntax are supported.",
         {
           chat_id: chatId,
           message_id: messageId,
           reply_markup: {
             inline_keyboard: [[
-              { text: "❌ Annulla", callback_data: "lists:canceladd" },
+              { text: "❌ Cancel", callback_data: "lists:canceladd" },
             ]],
           },
         },
@@ -658,12 +658,12 @@ bot.on("callback_query", async query => {
     }
 
     if (data === "lists:refresh") {
-      await bot.answerCallbackQuery(query.id, { text: "Aggiornamento liste avviato…" });
+      await bot.answerCallbackQuery(query.id, { text: "Blocklist refresh started…" });
       const result = await api("/admin/lists/refresh", { method: "POST", body: "{}" });
       await editListsHome(chatId, messageId);
       if (result.failed) {
         await bot.answerCallbackQuery(query.id, {
-          text: `Aggiornate: ${result.updated}, errori: ${result.failed}`,
+          text: `Updated: ${result.updated}, failed: ${result.failed}`,
           show_alert: true,
         }).catch(() => {});
       }
@@ -674,7 +674,7 @@ bot.on("callback_query", async query => {
     if (listDetailMatch) {
       const item = await getListById(listDetailMatch[1]);
       if (!item) {
-        await bot.answerCallbackQuery(query.id, { text: "Lista non trovata.", show_alert: true });
+        await bot.answerCallbackQuery(query.id, { text: "Blocklist not found.", show_alert: true });
         await editListsHome(chatId, messageId);
         return;
       }
@@ -702,14 +702,14 @@ bot.on("callback_query", async query => {
         reply_markup: view.reply_markup,
       });
       await bot.answerCallbackQuery(query.id, {
-        text: result.source.enabled ? "Lista abilitata" : "Lista disabilitata",
+        text: result.source.enabled ? "Blocklist enabled" : "Blocklist disabled",
       });
       return;
     }
 
     const listRefreshMatch = data.match(/^lists:r:([a-f0-9]{12})$/);
     if (listRefreshMatch) {
-      await bot.answerCallbackQuery(query.id, { text: "Aggiornamento…" });
+      await bot.answerCallbackQuery(query.id, { text: "Refreshing…" });
       const result = await api(`/admin/lists/${listRefreshMatch[1]}/refresh`, {
         method: "POST",
         body: "{}",
@@ -738,8 +738,8 @@ bot.on("callback_query", async query => {
           message_id: messageId,
           reply_markup: {
             inline_keyboard: [
-              [{ text: "🗑 Sì, rimuovi", callback_data: `lists:x:${item.id}` }],
-              [{ text: "⬅️ Annulla", callback_data: `lists:d:${item.id}` }],
+              [{ text: "🗑 Yes, remove", callback_data: `lists:x:${item.id}` }],
+              [{ text: "⬅️ Cancel", callback_data: `lists:d:${item.id}` }],
             ],
           },
         },
@@ -752,7 +752,7 @@ bot.on("callback_query", async query => {
     if (listDeleteMatch) {
       await api(`/admin/lists/${listDeleteMatch[1]}`, { method: "DELETE" });
       await editListsHome(chatId, messageId);
-      await bot.answerCallbackQuery(query.id, { text: "Lista rimossa" });
+      await bot.answerCallbackQuery(query.id, { text: "Blocklist removed" });
       return;
     }
 
@@ -775,7 +775,7 @@ bot.on("callback_query", async query => {
       const { item } = await findDomainOnPage(key, page);
 
       if (!item) {
-        await bot.answerCallbackQuery(query.id, { text: "Dominio non più presente in questa pagina.", show_alert: true });
+        await bot.answerCallbackQuery(query.id, { text: "Domain is no longer present on this page.", show_alert: true });
         await editDomainsList(chatId, messageId, page);
         return;
       }
@@ -820,10 +820,10 @@ bot.on("callback_query", async query => {
       return;
     }
 
-    await bot.answerCallbackQuery(query.id, { text: "Azione non valida." });
+    await bot.answerCallbackQuery(query.id, { text: "Invalid action." });
   } catch (error) {
     await bot.answerCallbackQuery(query.id, {
-      text: error instanceof Error ? error.message.slice(0, 180) : "Errore",
+      text: error instanceof Error ? error.message.slice(0, 180) : "Error",
       show_alert: true,
     });
   }
@@ -849,15 +849,15 @@ bot.on("message", async msg => {
       await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
       await editVpnHome(chatId, pendingPeerMessageId);
       await sendTrackedMessage(chatId, [
-        `✅ Utente VPN creato: ${peer.name ?? text}`,
+        `✅ VPN user created: ${peer.name ?? text}`,
         "",
-        "1. Installa l’app ufficiale WireGuard su iOS o Android.",
-        "2. Apri di nuovo /vpn e seleziona questo utente.",
-        "3. Premi Mostra QR e scansionalo dall’app WireGuard.",
-        "4. Salva e attiva il tunnel.",
-        "5. Verifica handshake e traffico dal dettaglio dell’utente.",
+        "1. Install the official WireGuard app on iOS or Android.",
+        "2. Open /vpn again and select this user.",
+        "3. Tap Show QR and scan it from WireGuard.",
+        "4. Save and activate the tunnel.",
+        "5. Verify the handshake and traffic in the user details.",
         "",
-        "Il QR e il file di configurazione contengono chiavi private: non condividerli.",
+        "The QR and configuration contain private keys. Do not share them.",
       ].join("\n"));
       return;
     }
@@ -882,7 +882,7 @@ bot.on("message", async msg => {
         } catch (error) {
           await sendTrackedMessage(
             chatId,
-            `Impossibile aggiungere la lista: ${error instanceof Error ? error.message : String(error)}\n\nInvia un altro URL HTTPS oppure usa /lists per annullare.`,
+            `Unable to add blocklist: ${error instanceof Error ? error.message : String(error)}\n\nSend another HTTPS URL or use /lists to cancel.`,
           );
           return;
         }
@@ -897,7 +897,7 @@ bot.on("message", async msg => {
     if (text === "/status") {
       const status = await api("/admin/status");
       await sendTrackedMessage(chatId,
-        `DNS VPN: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nBlocklist attive: ${status.blocklists ?? 0}\nDomini esterni unici: ${status.externalBlockedDomains ?? 0}\nDuplicati tra liste: ${status.blocklistDuplicateEntries ?? 0}\nListe in errore: ${status.blocklistErrors ?? 0}`
+        `VPN DNS: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nActive blocklists: ${status.blocklists ?? 0}\nUnique external domains: ${status.externalBlockedDomains ?? 0}\nDuplicates across lists: ${status.blocklistDuplicateEntries ?? 0}\nLists with errors: ${status.blocklistErrors ?? 0}`
       );
       return;
     }
@@ -911,15 +911,15 @@ bot.on("message", async msg => {
 
       const health = healthResult.status === "fulfilled"
         ? `OK (${healthResult.value.statsStorage ?? "unknown"})`
-        : `ERRORE: ${healthResult.reason instanceof Error ? healthResult.reason.message : String(healthResult.reason)}`;
+        : `ERROR: ${healthResult.reason instanceof Error ? healthResult.reason.message : String(healthResult.reason)}`;
 
       const ready = readyResult.status === "fulfilled"
         ? `OK (${readyResult.value.statsStorage ?? "unknown"})`
-        : `ERRORE: ${readyResult.reason instanceof Error ? readyResult.reason.message : String(readyResult.reason)}`;
+        : `ERROR: ${readyResult.reason instanceof Error ? readyResult.reason.message : String(readyResult.reason)}`;
 
       const updater = updaterResult.status === "fulfilled"
         ? `${updaterResult.value.running ? "running" : (updaterResult.value.lastSuccess === true ? "success" : updaterResult.value.lastSuccess === false ? "failed" : "idle")} @ ${updaterResult.value.currentSha ?? "-"}`
-        : `ERRORE: ${updaterResult.reason instanceof Error ? updaterResult.reason.message : String(updaterResult.reason)}`;
+        : `ERROR: ${updaterResult.reason instanceof Error ? updaterResult.reason.message : String(updaterResult.reason)}`;
 
       const runtimeLine = updaterResult.status === "fulfilled"
         ? `Runtime: updater gen ${updaterResult.value.runtimeGeneration ?? "legacy"} @ ${String(updaterResult.value.runtimeBuildSha ?? "unknown").slice(0, 8)} · bot gen ${botRuntimeGeneration}`
@@ -938,7 +938,7 @@ bot.on("message", async msg => {
       await sendTrackedMessage(
         chatId,
         [
-          "🩺 Diagnostica",
+          "🩺 Diagnostics",
           `Resolver: ${health}`,
           `Storage ready: ${ready}`,
           `Updater: ${updater}`,
@@ -953,7 +953,7 @@ bot.on("message", async msg => {
       const data = await getDomainsPage(0);
 
       if (!data.items.length) {
-        await sendTrackedMessage(chatId, "Nessun dominio osservato.");
+        await sendTrackedMessage(chatId, "No observed domains.");
         return;
       }
 

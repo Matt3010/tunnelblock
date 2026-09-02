@@ -464,7 +464,7 @@ async function reconcileInterruptedDeployment(): Promise<void> {
 
   persistUpdateState(failedState);
   await notifyTelegram(
-    "❌ Aggiornamento AdBlock interrotto: il deployment helper non è più in esecuzione.",
+    "❌ TunnelBlock update interrupted: the deployment helper is no longer running.",
   );
 }
 
@@ -580,8 +580,8 @@ async function launchDeployment(
 
     await notifyTelegram(
       trigger === "automatic"
-        ? "🔄 Nuovo push su master rilevato. Aggiornamento AdBlock avviato."
-        : "🔄 Aggiornamento AdBlock avviato.",
+        ? "🔄 New push to master detected. TunnelBlock update started."
+        : "🔄 TunnelBlock update started.",
     );
 
     return { started: true, helperId };
@@ -598,7 +598,7 @@ async function launchDeployment(
     });
 
     await notifyTelegram(
-      `❌ Impossibile avviare l'aggiornamento AdBlock: ${message}`,
+      `❌ Unable to start the TunnelBlock update: ${message}`,
     );
 
     throw error;
@@ -786,7 +786,7 @@ app.get("/https/ca", async (request, reply) => {
     const certificate = fs.readFileSync(httpsPublicCaFile);
     const parsed = new X509Certificate(certificate);
     return {
-      filename: "adblock-general-purpose-ca.cer",
+      filename: "tunnelblock-ca.cer",
       contentType: "application/x-x509-ca-cert",
       base64: certificate.toString("base64"),
       fingerprint256: parsed.fingerprint256,
@@ -818,7 +818,7 @@ app.post("/integrations/:id/actions/:action", async (request, reply) => {
       await ensureHttpsCa();
       const certificate = fs.readFileSync(httpsPublicCaFile);
       const parsed = new X509Certificate(certificate);
-      return { ok: true, certificate: { filename: "adblock-general-purpose-ca.cer", contentType: "application/x-x509-ca-cert",
+      return { ok: true, certificate: { filename: "tunnelblock-ca.cer", contentType: "application/x-x509-ca-cert",
         base64: certificate.toString("base64"), fingerprint256: parsed.fingerprint256 } };
     }
     if (metadata.kind === "stop") {

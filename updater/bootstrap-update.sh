@@ -39,7 +39,7 @@ bootstrap_failure() {
   export TARGET_SHA="${TARGET_SHA:-}"
   printf '%s\n' "Bootstrap failed with exit code $CODE" >>"$LOG_FILE" 2>/dev/null || true
   node /update-state.mjs failed 2>/dev/null || true
-  notify "❌ Aggiornamento AdBlock fallito durante il bootstrap. Exit code: $CODE"
+  notify "❌ TunnelBlock update failed during bootstrap. Exit code: $CODE"
 }
 
 on_exit() {

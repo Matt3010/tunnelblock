@@ -1,7 +1,38 @@
-# adblock-general-purpose
+# TunnelBlock
 
-Self-hosted mobile ad-blocking stack for iOS and Android running on a Raspberry Pi. Clients use a WireGuard
-**full tunnel**; no public DNS-over-HTTPS endpoint is exposed.
+Self-hosted mobile ad blocking through WireGuard, designed for Raspberry Pi and
+managed from Telegram. iOS and Android clients use the same full-tunnel configuration;
+no public DNS or administration endpoint is exposed.
+
+## Features
+
+| Capability | iOS | Android |
+| --- | :---: | :---: |
+| WireGuard full tunnel | ✅ | ✅ |
+| DNS allow/block rules | ✅ | ✅ |
+| QR and `.conf` onboarding | ✅ | ✅ |
+| Multiple VPN peers | ✅ | ✅ |
+| Telegram administration | ✅ | ✅ |
+| Automatic updates with rollback | ✅ | ✅ |
+| HTTPS inspection | Experimental | Experimental |
+
+The HTTPS strategy registry is intentionally empty. A CA is not required for normal
+WireGuard or DNS filtering.
+
+## Quick start
+
+Requirements: a Raspberry Pi or Linux host with Git, Docker Engine, Docker Compose,
+a Telegram bot token and a router capable of forwarding UDP/51820.
+
+```bash
+git clone https://github.com/Matt3010/tunnelblock.git
+cd tunnelblock
+sh ops/install.sh
+```
+
+The installer preserves an existing `.env`, never removes Docker volumes and never
+touches existing WireGuard keys. See [docs/INSTALL.md](docs/INSTALL.md) before exposing
+UDP/51820 on the router.
 
 ## Architecture
 
@@ -92,6 +123,9 @@ The updater watches `master`. A deployment runs the current `ops/deploy.sh`, whi
 8. rolls back to the previous SHA if deployment fails.
 
 Persistent data is not reset during this process.
+
+After the one-time installation, deploy updates only through `/update` in Telegram.
+Do not invoke `ops/deploy.sh` directly and never use `docker compose down -v`.
 
 ## License
 

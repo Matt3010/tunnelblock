@@ -182,7 +182,7 @@ set -e
 if [ "$DEPLOY_CODE" -eq 0 ]; then
   log "Deployment completed successfully."
   node /update-state.mjs success
-  notify "✅ AdBlock aggiornato correttamente a $TARGET_SHA."
+  notify "✅ TunnelBlock successfully updated to $TARGET_SHA."
   exit 0
 fi
 
@@ -195,10 +195,10 @@ set -e
 
 if [ "$ROLLBACK_CODE" -eq 0 ]; then
   log "Rollback recovered the previous stack."
-  notify "❌ Aggiornamento AdBlock fallito. Rollback completato. Usa /update_status per i dettagli."
+  notify "❌ TunnelBlock update failed. Rollback completed. Use /update_status for details."
 else
   log "CRITICAL: rollback failed with exit code $ROLLBACK_CODE."
-  notify "❌ Aggiornamento AdBlock fallito e rollback incompleto. Usa /update_status per i dettagli."
+  notify "❌ TunnelBlock update failed and rollback is incomplete. Use /update_status for details."
 fi
 
 node /update-state.mjs failed

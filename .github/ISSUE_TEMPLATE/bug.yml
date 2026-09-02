@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a reproducible TunnelBlock problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never include `.env`, WireGuard configurations, QR codes, private keys or API tokens.
+  - type: input
+    id: version
+    attributes:
+      label: Revision
+      description: Commit SHA or release version.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options: [WireGuard, DNS blocker, Telegram bot, Updater, HTTPS lab, Documentation]
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Remove public IPs, tokens, keys, QR codes and sensitive domains.

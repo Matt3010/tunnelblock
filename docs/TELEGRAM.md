@@ -9,6 +9,8 @@ The Telegram bot is the remote control panel for the WireGuard DNS resolver.
 /diag
 /domains
 /lists
+/vpn
+/integrations
 /topblocked
 /topallowed
 /reload
@@ -31,6 +33,12 @@ currently active for each domain.
 The bot does not execute arbitrary shell commands.
 
 It talks only to the authenticated resolver/updater APIs on the Docker network.
+
+`/vpn` creates and manages platform-independent WireGuard peers. After creating a peer,
+the bot provides the same QR/config onboarding steps for iOS and Android.
+
+`/integrations` renders the optional HTTPS strategy registry. The registry is currently
+empty and normal DNS filtering never requires a CA certificate.
 
 ## Required environment variables
 

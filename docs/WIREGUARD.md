@@ -106,7 +106,7 @@ The QR and raw configuration contain the client's private key and preshared key.
 
 ## Remove the old managed DoH profile
 
-On devices previously configured with an AdBlock managed DoH profile, remove that profile. The project is
+On devices previously configured with the legacy managed DoH profile, remove that profile. TunnelBlock is
 WireGuard-only and no longer serves the profile or its public DoH endpoint.
 
 This ensures DNS is sent directly to the WireGuard-provided resolver `10.66.66.1`.

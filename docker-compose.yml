@@ -154,7 +154,7 @@ services:
       UPDATER_STATE_FILE: /updater-data/state.json
       UPDATER_LOG_FILE: /updater-data/deploy.log
       UPDATER_DATA_VOLUME: adblock-general-purpose-updater-data
-      UPDATER_RUNTIME_GENERATION: "3"
+      UPDATER_RUNTIME_GENERATION: "4"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
     volumes:
@@ -190,7 +190,7 @@ services:
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
       TELEGRAM_CLEANUP_INTERVAL_HOURS: 12
       TELEGRAM_DATA_DIR: /telegram-data
-      BOT_RUNTIME_GENERATION: "3"
+      BOT_RUNTIME_GENERATION: "4"
     volumes:
       - telegram-data:/telegram-data
 

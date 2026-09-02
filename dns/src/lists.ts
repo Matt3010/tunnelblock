@@ -205,7 +205,7 @@ export class BlocklistManager {
       redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: {
-        "user-agent": "adblock-general-purpose/1.0",
+        "user-agent": "TunnelBlock/1.0",
         accept: "text/plain,*/*;q=0.8",
       },
     });

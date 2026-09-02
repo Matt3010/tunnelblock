@@ -71,7 +71,7 @@ dst.write_bytes(x509.load_pem_x509_certificate(src.read_bytes()).public_bytes(En
 '
 
   if [ ! -s "$DER" ]; then
-    echo "Unable to export iOS CA certificate." >&2
+    echo "Unable to export the mobile CA certificate." >&2
     exit 4
   fi
 
