@@ -41,8 +41,6 @@ jobs:
           docker compose run --rm --no-deps --entrypoint npm updater test
           docker compose run --rm --no-deps --entrypoint npm updater run typecheck
           docker compose run --rm --no-deps --entrypoint npm telegram-bot run typecheck
-          HTTPS_IMAGE="$(docker compose --profile https-lab images -q https-proxy)"
-          test -n "$HTTPS_IMAGE"
-          docker run --rm --entrypoint python "$HTTPS_IMAGE" -B -m unittest discover -s /tests -v
+          docker run --rm --entrypoint python adblock-general-purpose-https-proxy:latest -B -m unittest discover -s /tests -v
       - name: Verify HTTPS proxy is excluded by default
         run: test -z "$(docker compose config --services | grep '^https-proxy$' || true)"
