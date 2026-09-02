@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
+import { X509Certificate } from "node:crypto";
 import { promisify } from "node:util";
 import Fastify from "fastify";
 import { runtimeNeedsDeployment } from "./revision.js";
@@ -40,7 +41,22 @@ type UpdateState = {
   failedRemoteSha: string | null;
 };
 
+type HttpsIntegrationAction = {
+  id: string;
+  label: string;
+  kind: string;
+};
+
+type HttpsIntegration = {
+  id: string;
+  name: string;
+  description: string;
+  hosts: string[];
+  actions: HttpsIntegrationAction[];
+};
+
 let launching = false;
+let integrationBusy = false;
 let lastAutomaticCheckAt: string | null = null;
 let lastAutomaticCheckError: string | null = null;
 
@@ -270,6 +286,241 @@ async function resolveHostRepoDir(): Promise<string> {
   if (!hostRepoDir) throw new Error("Unable to resolve host repository path");
 
   return hostRepoDir;
+}
+
+const integrationRegistryPath = path.join(
+  repoDir,
+  "https",
+  "config",
+  "integrations.json",
+);
+
+function loadHttpsIntegrations(): HttpsIntegration[] {
+  const payload = JSON.parse(fs.readFileSync(integrationRegistryPath, "utf8")) as {
+    integrations?: unknown;
+  };
+
+  if (!Array.isArray(payload.integrations)) {
+    throw new Error("invalid HTTPS integration registry");
+  }
+
+  const seen = new Set<string>();
+  return payload.integrations.map((raw: any) => {
+    const id = typeof raw?.id === "string" ? raw.id : "";
+    const name = typeof raw?.name === "string" ? raw.name : "";
+    const description = typeof raw?.description === "string" ? raw.description : "";
+    const hosts = Array.isArray(raw?.hosts)
+      ? raw.hosts.filter((value: unknown): value is string => typeof value === "string")
+      : [];
+    const actions = Array.isArray(raw?.actions)
+      ? raw.actions
+          .filter((value: unknown): value is Record<string, unknown> =>
+            Boolean(value) && typeof value === "object",
+          )
+          .map((value: any) => ({
+            id: typeof value.id === "string" ? value.id : "",
+            label: typeof value.label === "string" ? value.label : "",
+            kind: typeof value.kind === "string" ? value.kind : "",
+          }))
+      : [];
+
+    if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id) || seen.has(id)) {
+      throw new Error("invalid or duplicate HTTPS integration id");
+    }
+    if (!name || hosts.length === 0 || actions.length === 0) {
+      throw new Error(`invalid HTTPS integration: ${id}`);
+    }
+    for (const action of actions) {
+      if (
+        !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(action.id) ||
+        !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(action.kind) ||
+        !action.label
+      ) {
+        throw new Error(`invalid HTTPS action for ${id}`);
+      }
+    }
+
+    seen.add(id);
+    return { id, name, description, hosts, actions };
+  });
+}
+
+function getHttpsIntegration(id: string): HttpsIntegration | null {
+  return loadHttpsIntegrations().find(item => item.id === id) ?? null;
+}
+
+function httpsObservationPath(id: string): string {
+  if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id)) {
+    throw new Error("invalid HTTPS integration id");
+  }
+  return path.join(repoDir, "data", "https", "observations", `${id}.jsonl`);
+}
+
+async function httpsProxyRuntime(): Promise<{
+  state: string;
+  running: boolean;
+  integrationId: string | null;
+}> {
+  let containerId = "";
+  try {
+    const { stdout } = await execFileAsync(
+      "docker",
+      ["compose", "--profile", "https-lab", "ps", "-q", "--all", "https-proxy"],
+      { cwd: repoDir, env: process.env },
+    );
+    containerId = stdout.trim();
+  } catch {
+    return { state: "missing", running: false, integrationId: null };
+  }
+
+  if (!containerId) {
+    return { state: "missing", running: false, integrationId: null };
+  }
+
+  let state = "unknown";
+  let integrationId: string | null = null;
+
+  try {
+    const { stdout } = await execFileAsync(
+      "docker",
+      [
+        "inspect",
+        "--format",
+        "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+        containerId,
+      ],
+      { env: process.env },
+    );
+    state = stdout.trim() || "unknown";
+  } catch {}
+
+  try {
+    const { stdout } = await execFileAsync(
+      "docker",
+      ["inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", containerId],
+      { env: process.env },
+    );
+    const line = stdout
+      .split("\n")
+      .find(value => value.startsWith("HTTPS_INTEGRATION="));
+    integrationId = line ? line.slice("HTTPS_INTEGRATION=".length) : null;
+  } catch {}
+
+  return {
+    state,
+    running: state === "healthy" || state === "running" || state === "starting",
+    integrationId,
+  };
+}
+
+async function runHttpsLab(action: string, integrationId: string): Promise<string> {
+  const hostRepoDir = await resolveHostRepoDir();
+  const { stdout, stderr } = await execFileAsync(
+    "sh",
+    ["scripts/https-lab.sh", action, integrationId],
+    {
+      cwd: repoDir,
+      env: {
+        ...process.env,
+        HOST_REPO_DIR: hostRepoDir,
+      },
+      maxBuffer: 2 * 1024 * 1024,
+    },
+  );
+  return [stdout, stderr].filter(Boolean).join("\n").trim();
+}
+
+function summarizeHttpsObservation(integrationId: string) {
+  const logPath = httpsObservationPath(integrationId);
+  let raw = "";
+  try {
+    raw = fs.readFileSync(logPath, "utf8");
+  } catch {
+    return {
+      available: false,
+      records: 0,
+      tlsClientHello: 0,
+      tlsEstablishedClient: 0,
+      tlsFailedClient: 0,
+      httpRequests: 0,
+      httpResponses: 0,
+      uniqueHosts: 0,
+      failureCategories: {},
+      likelyCertificatePinning: false,
+    };
+  }
+
+  let records = 0;
+  let tlsClientHello = 0;
+  let tlsEstablishedClient = 0;
+  let tlsFailedClient = 0;
+  let httpRequests = 0;
+  let httpResponses = 0;
+  const hosts = new Set<string>();
+  const failureCategories: Record<string, number> = {};
+
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      records += 1;
+      const event = record.event;
+      if (event === "tls_clienthello") tlsClientHello += 1;
+      if (event === "tls_established_client") tlsEstablishedClient += 1;
+      if (event === "tls_failed_client") {
+        tlsFailedClient += 1;
+        const category =
+          typeof record.error_category === "string"
+            ? record.error_category
+            : "unknown";
+        failureCategories[category] = (failureCategories[category] ?? 0) + 1;
+      }
+      if (event === "http_request") {
+        httpRequests += 1;
+        if (typeof record.host === "string") hosts.add(record.host);
+      }
+      if (event === "http_response") httpResponses += 1;
+    } catch {}
+  }
+
+  return {
+    available: true,
+    records,
+    tlsClientHello,
+    tlsEstablishedClient,
+    tlsFailedClient,
+    httpRequests,
+    httpResponses,
+    uniqueHosts: hosts.size,
+    failureCategories,
+    likelyCertificatePinning:
+      tlsClientHello > 0 &&
+      tlsFailedClient > 0 &&
+      tlsEstablishedClient === 0 &&
+      httpRequests === 0,
+  };
+}
+
+async function publicHttpsCertificate(integrationId: string) {
+  await runHttpsLab("ca-prepare", integrationId);
+  const pemPath = path.join(
+    repoDir,
+    "data",
+    "https",
+    "ca",
+    "mitmproxy-ca-cert.pem",
+  );
+  const pem = fs.readFileSync(pemPath);
+  const certificate = new X509Certificate(pem);
+
+  return {
+    filename: "adblock-general-purpose-ca.cer",
+    contentType: "application/x-x509-ca-cert",
+    certificateBase64: certificate.raw.toString("base64"),
+    fingerprint256: certificate.fingerprint256,
+    validFrom: certificate.validFrom,
+    validTo: certificate.validTo,
+  };
 }
 
 async function deploymentHelperExists(): Promise<boolean> {
@@ -565,6 +816,146 @@ app.post("/update", async (request, reply) => {
     return reply.code(500).send({
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+});
+
+app.get("/integrations", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+
+  const runtime = await httpsProxyRuntime();
+  return {
+    runtime,
+    items: loadHttpsIntegrations().map(item => ({
+      ...item,
+      active: runtime.running && runtime.integrationId === item.id,
+    })),
+  };
+});
+
+app.get("/integrations/:id", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+
+  const { id } = request.params as { id: string };
+  const integration = getHttpsIntegration(id);
+  if (!integration) {
+    return reply.code(404).send({ error: "integration not found" });
+  }
+
+  const runtime = await httpsProxyRuntime();
+  return {
+    ...integration,
+    active: runtime.running && runtime.integrationId === integration.id,
+    runtime,
+    summary: summarizeHttpsObservation(integration.id),
+  };
+});
+
+app.post("/integrations/:id/actions/:action", async (request, reply) => {
+  if (!authorized(request, reply)) return;
+
+  const { id, action } = request.params as { id: string; action: string };
+  const integration = getHttpsIntegration(id);
+  if (!integration) {
+    return reply.code(404).send({ error: "integration not found" });
+  }
+
+  const registeredAction = integration.actions.find(item => item.id === action);
+  if (!registeredAction) {
+    return reply.code(404).send({ error: "integration action not found" });
+  }
+
+  const updateState = loadUpdateState();
+  if (updateState.running || launching) {
+    return reply.code(409).send({
+      error: "HTTPS integration actions are unavailable during deployment",
+    });
+  }
+  if (integrationBusy) {
+    return reply.code(409).send({ error: "another HTTPS integration action is running" });
+  }
+
+  integrationBusy = true;
+  try {
+    if (registeredAction.kind === "certificate") {
+      return {
+        ok: true,
+        integration: integration.id,
+        certificate: await publicHttpsCertificate(integration.id),
+      };
+    }
+
+    if (registeredAction.kind === "start") {
+      const runtime = await httpsProxyRuntime();
+      if (runtime.running && runtime.integrationId !== integration.id) {
+        return reply.code(409).send({
+          error: `another integration is active: ${runtime.integrationId ?? "unknown"}`,
+        });
+      }
+
+      const output = await runHttpsLab("start", integration.id);
+      return {
+        ok: true,
+        integration: integration.id,
+        output,
+        runtime: await httpsProxyRuntime(),
+      };
+    }
+
+    if (registeredAction.kind === "stop") {
+      const runtime = await httpsProxyRuntime();
+      if (runtime.running && runtime.integrationId && runtime.integrationId !== integration.id) {
+        return reply.code(409).send({
+          error: `another integration is active: ${runtime.integrationId}`,
+        });
+      }
+
+      const output = await runHttpsLab("stop", integration.id);
+      return {
+        ok: true,
+        integration: integration.id,
+        output,
+        runtime: await httpsProxyRuntime(),
+      };
+    }
+
+    if (registeredAction.kind === "summary") {
+      return {
+        ok: true,
+        integration: integration.id,
+        summary: summarizeHttpsObservation(integration.id),
+      };
+    }
+
+    if (registeredAction.kind === "clear") {
+      const logPath = httpsObservationPath(integration.id);
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+      fs.writeFileSync(logPath, "");
+      try {
+        fs.unlinkSync(logPath + ".1");
+      } catch {}
+      return {
+        ok: true,
+        integration: integration.id,
+        summary: summarizeHttpsObservation(integration.id),
+      };
+    }
+
+    return reply.code(400).send({
+      error: `unsupported integration action kind: ${registeredAction.kind}`,
+    });
+  } catch (error) {
+    const safe = safeProcessError(error);
+    app.log.error(
+      { integration: integration.id, action, error: safe },
+      "https-integration-action-failed",
+    );
+    return reply.code(500).send({
+      error:
+        safe.stderr ||
+        (error instanceof Error ? error.message : String(error)),
+    });
+  } finally {
+    integrationBusy = false;
   }
 });
 
