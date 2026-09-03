@@ -14,6 +14,7 @@ no public DNS or administration endpoint is exposed.
 | Multiple VPN peers | ✅ | ✅ |
 | Telegram administration | ✅ | ✅ |
 | Automatic updates with rollback | ✅ | ✅ |
+| Rolling DNS resolver updates | ✅ | ✅ |
 | HTTPS inspection | Experimental | Experimental |
 
 The HTTPS strategy registry is intentionally empty. A CA is not required for normal
@@ -118,9 +119,15 @@ The updater watches `master`. A deployment runs the current `ops/deploy.sh`, whi
 3. syntax-checks WireGuard scripts;
 4. runs DNS tests;
 5. runs TypeScript checks for DNS, Telegram and updater;
-6. recreates the stack only after pre-flight checks pass;
-7. verifies service health and updater revision;
-8. rolls back to the previous SHA if deployment fails.
+6. updates the two DNS resolver replicas one at a time, keeping the other replica available;
+7. reconciles the remaining services without forcing unchanged containers to restart;
+8. verifies service health and updater revision;
+9. rolls back to the previous SHA if deployment fails.
+
+The rolling resolver path keeps DNS filtering available while `doh-a` and `doh-b` are
+updated. If the WireGuard service itself changes, or an older installation does not yet
+support live upstream reloads, the updater falls back to a normal recreation and a brief
+VPN interruption can still occur.
 
 Persistent data is not reset during this process.
 
