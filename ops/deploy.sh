@@ -205,9 +205,12 @@ deploy_target() (
   log "== Pre-flight: shell checks =="
   sh -n ops/deploy.sh vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/https-firewall.sh scripts/wireguard-client.sh scripts/https-ca.sh scripts/https-runtime.sh >>"$LOG_FILE" 2>&1
 
-  log "== Pre-flight: DNS tests =="
+  log "== Pre-flight: DNS and updater tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1
   docker compose run --rm --no-deps --entrypoint npm updater test >>"$LOG_FILE" 2>&1
+
+  log "== Pre-flight: Telegram bot tests =="
+  docker compose run --rm --no-deps --entrypoint npm telegram-bot test >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: HTTPS framework and registry tests =="
   docker compose --profile https-lab run --rm --no-deps --entrypoint python https-proxy -B -m unittest discover -s /tests -v >>"$LOG_FILE" 2>&1
