@@ -202,7 +202,7 @@ deploy_target() (
   docker compose --profile https-lab build https-proxy >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: shell checks =="
-  sh -n vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/https-firewall.sh scripts/wireguard-client.sh scripts/https-ca.sh scripts/https-runtime.sh >>"$LOG_FILE" 2>&1
+  sh -n ops/deploy.sh vpn/wireguard/entrypoint.sh vpn/wireguard/healthcheck.sh vpn/wireguard/show-client.sh vpn/wireguard/https-firewall.sh scripts/wireguard-client.sh scripts/https-ca.sh scripts/https-runtime.sh >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: DNS tests =="
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1
