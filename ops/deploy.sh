@@ -68,6 +68,87 @@ wait_service() {
   return 1
 }
 
+wireguard_dns_reload_supported() {
+  docker compose exec -T wireguard sh -c '
+    test -f /run/dnsmasq-servers.conf &&
+    grep -q "^servers-file=/run/dnsmasq-servers.conf$" /run/dnsmasq.conf &&
+    pidof dnsmasq >/dev/null 2>&1
+  ' >/dev/null 2>&1
+}
+
+configure_wireguard_dns_upstreams() {
+  UPSTREAMS="$1"
+  log "Configure live VPN DNS upstreams: $UPSTREAMS"
+
+  docker compose exec -T -e DNS_UPSTREAM_SELECTION="$UPSTREAMS" wireguard sh -eu -c '
+    SERVERS_FILE=/run/dnsmasq-servers.conf
+    TMP_FILE="$SERVERS_FILE.tmp"
+    : >"$TMP_FILE"
+
+    resolve_upstream() {
+      NAME="$1"
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        ADDRESS="$(getent hosts "$NAME" 2>/dev/null | awk "NR==1 {print \$1}" || true)"
+        if [ -n "$ADDRESS" ] && ! printf "%s" "$ADDRESS" | grep -q ":"; then
+          printf "%s" "$ADDRESS"
+          return 0
+        fi
+        sleep 1
+      done
+      return 1
+    }
+
+    OLD_IFS="$IFS"
+    IFS=","
+    for UPSTREAM in $DNS_UPSTREAM_SELECTION; do
+      IFS="$OLD_IFS"
+      UPSTREAM="$(printf "%s" "$UPSTREAM" | tr -d " ")"
+      [ -n "$UPSTREAM" ] || continue
+      UPSTREAM_IP="$(resolve_upstream "$UPSTREAM")"
+      echo "server=$UPSTREAM_IP#53" >>"$TMP_FILE"
+      IFS=","
+    done
+    IFS="$OLD_IFS"
+
+    test -s "$TMP_FILE"
+    mv "$TMP_FILE" "$SERVERS_FILE"
+    kill -HUP "$(pidof dnsmasq)"
+  ' >>"$LOG_FILE" 2>&1
+}
+
+can_roll_resolvers() {
+  wireguard_dns_reload_supported &&
+    [ "$(service_state doh-a)" = "healthy" ] &&
+    [ "$(service_state doh-b)" = "healthy" ]
+}
+
+rolling_update_resolvers() {
+  log "== Rolling DNS resolver update =="
+
+  # Keep doh-a as the only live upstream while doh-b is replaced.
+  configure_wireguard_dns_upstreams "doh-a"
+  docker compose up -d --no-deps --force-recreate doh-b >>"$LOG_FILE" 2>&1
+  wait_service doh-b healthy
+  configure_wireguard_dns_upstreams "doh-a,doh-b"
+
+  # Then keep doh-b serving while doh-a is replaced.
+  configure_wireguard_dns_upstreams "doh-b"
+  docker compose up -d --no-deps --force-recreate doh-a >>"$LOG_FILE" 2>&1
+  wait_service doh-a healthy
+  configure_wireguard_dns_upstreams "doh-a,doh-b"
+}
+
+reconcile_stack() {
+  if can_roll_resolvers; then
+    rolling_update_resolvers
+    log "== Reconcile remaining stack without forcing unchanged services =="
+    docker compose up -d --remove-orphans >>"$LOG_FILE" 2>&1
+  else
+    log "== Rolling DNS unavailable; perform compatibility full recreation =="
+    docker compose up -d --force-recreate --remove-orphans >>"$LOG_FILE" 2>&1
+  fi
+}
+
 verify_updater_revision() {
   EXPECTED_SHA="$1"
   CID="$(docker compose ps -q updater 2>/dev/null || true)"
@@ -139,8 +220,7 @@ deploy_target() (
   log "== Stop experimental HTTPS lab =="
   sh scripts/https-runtime.sh stop >>"$LOG_FILE" 2>&1 || true
 
-  log "== Recreate complete stack =="
-  docker compose up -d --force-recreate --remove-orphans >>"$LOG_FILE" 2>&1
+  reconcile_stack
   sh scripts/https-runtime.sh reset-state >>"$LOG_FILE" 2>&1
 
   log "== Verify stack =="
@@ -156,7 +236,7 @@ rollback_previous() (
 
   docker compose config --quiet >>"$LOG_FILE" 2>&1
   docker compose build >>"$LOG_FILE" 2>&1
-  docker compose up -d --force-recreate --remove-orphans >>"$LOG_FILE" 2>&1
+  reconcile_stack
 
   wait_service doh-a healthy
   wait_service doh-b healthy
