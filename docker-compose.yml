@@ -188,7 +188,7 @@ services:
       ADMIN_API_BASE: http://doh-a:8053
       UPDATER_API_BASE: http://updater:8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-      BOT_RUNTIME_GENERATION: "5"
+      BOT_RUNTIME_GENERATION: "6"
 
 networks:
   vpn-egress:
