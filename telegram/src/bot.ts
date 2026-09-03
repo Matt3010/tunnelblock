@@ -48,6 +48,7 @@ function formatDuration(totalSeconds: unknown): string {
 function serviceIcon(state: unknown): string {
   const value = String(state ?? "").toLowerCase();
   if (["healthy", "running", "online", "ready", "success"].includes(value)) return "✅";
+  if (["failed", "error", "unhealthy", "offline"].includes(value)) return "❌";
   if (["stopped", "inactive", "idle"].includes(value)) return "⚪";
   if (["starting", "updating", "running-update"].includes(value)) return "🔄";
   return "⚠️";
@@ -574,6 +575,7 @@ function helpText(): string {
     "/reload — reload DNS rules",
     "/update — update TunnelBlock",
     "/update_status — update progress",
+    "/help — show this overview",
   ].join("\n");
 }
 
