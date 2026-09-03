@@ -174,6 +174,7 @@ resolve_dns_upstream() {
 }
 
 DNSMASQ_CONF="/run/dnsmasq.conf"
+DNSMASQ_SERVERS="/run/dnsmasq-servers.conf"
 {
   echo "port=53"
   echo "no-resolv"
@@ -183,8 +184,10 @@ DNSMASQ_CONF="/run/dnsmasq.conf"
   echo "listen-address=${SERVER_IPV4_ADDRESS%/*}"
   echo "cache-size=1000"
   echo "strict-order"
+  echo "servers-file=$DNSMASQ_SERVERS"
 } >"$DNSMASQ_CONF"
 
+: >"$DNSMASQ_SERVERS"
 OLD_IFS="$IFS"
 IFS=','
 for UPSTREAM in $DNS_UPSTREAMS; do
@@ -195,7 +198,7 @@ for UPSTREAM in $DNS_UPSTREAMS; do
     echo "Unable to resolve DNS upstream service: $UPSTREAM" >&2
     exit 5
   }
-  echo "server=$UPSTREAM_IP#53" >>"$DNSMASQ_CONF"
+  echo "server=$UPSTREAM_IP#53" >>"$DNSMASQ_SERVERS"
   IFS=','
 done
 IFS="$OLD_IFS"
