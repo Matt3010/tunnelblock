@@ -154,7 +154,7 @@ services:
       UPDATER_STATE_FILE: /updater-data/state.json
       UPDATER_LOG_FILE: /updater-data/deploy.log
       UPDATER_DATA_VOLUME: adblock-general-purpose-updater-data
-      UPDATER_RUNTIME_GENERATION: "4"
+      UPDATER_RUNTIME_GENERATION: "5"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
     volumes:
