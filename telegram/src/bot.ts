@@ -69,7 +69,7 @@ async function ensureCommandsForChat(chatId: number): Promise<void> {
 }
 
 // No global command menu: unauthorized users should not see the control surface.
-await bot.setMyCommands([]);
+await bot.deleteMyCommands();
 for (const rawUserId of allowed) {
   const chatId = Number(rawUserId);
   if (!Number.isSafeInteger(chatId)) continue;
