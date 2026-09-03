@@ -188,11 +188,7 @@ services:
       ADMIN_API_BASE: http://doh-a:8053
       UPDATER_API_BASE: http://updater:8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-      TELEGRAM_CLEANUP_INTERVAL_HOURS: 12
-      TELEGRAM_DATA_DIR: /telegram-data
-      BOT_RUNTIME_GENERATION: "4"
-    volumes:
-      - telegram-data:/telegram-data
+      BOT_RUNTIME_GENERATION: "5"
 
 networks:
   vpn-egress:
@@ -203,7 +199,5 @@ networks:
 volumes:
   stats-data:
     name: adblock-general-purpose-stats-data
-  telegram-data:
-    name: adblock-general-purpose-telegram-data
   updater-data:
     name: adblock-general-purpose-updater-data
