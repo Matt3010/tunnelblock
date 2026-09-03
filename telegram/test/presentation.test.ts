@@ -114,7 +114,7 @@ test("update output is escaped and bounded", () => {
     lastSuccess: false,
     lastStartedAt: "2026-09-03T10:00:00Z",
     lastFinishedAt: "2026-09-03T10:01:00Z",
-    lastOutput: "<script>" + "x".repeat(5000),
+    lastOutput: "<".repeat(1500) + "<script>",
   });
   assert.doesNotMatch(text, /<script>/);
   assert.match(text, /&lt;script&gt;/);
