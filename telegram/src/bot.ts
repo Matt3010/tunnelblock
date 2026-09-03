@@ -1,58 +1,37 @@
 import TelegramBot from "node-telegram-bot-api";
+import { isAllowedUser, isPrivateChat, parseAllowedUserIds } from "./access.js";
+import {
+  codeHtml,
+  diagnosticsText,
+  domainDetailView,
+  domainsListView,
+  escapeHtml,
+  formatBytes,
+  formatCount,
+  helpText,
+  httpsSummaryText,
+  integrationDetailView,
+  integrationsHomeView,
+  listDetailView,
+  listsView,
+  serviceIcon,
+  shortListName,
+  statusText,
+  topSourceLabel,
+  updateStatusText,
+} from "./presentation.js";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const adminBase = process.env.ADMIN_API_BASE ?? "http://doh:8053";
 const updaterBase = process.env.UPDATER_API_BASE ?? "http://updater:8090";
 const adminToken = process.env.ADMIN_API_TOKEN;
 const botRuntimeGeneration = process.env.BOT_RUNTIME_GENERATION ?? "unknown";
-const allowed = new Set(
-  (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
-    .split(",")
-    .map(v => v.trim())
-    .filter(Boolean),
-);
+const allowed = parseAllowedUserIds(process.env.TELEGRAM_ALLOWED_USER_IDS ?? "");
 
 if (!token) throw new Error("TELEGRAM_BOT_TOKEN is required");
 if (!adminToken) throw new Error("ADMIN_API_TOKEN is required");
 
 const bot = new TelegramBot(token, { polling: true });
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function codeHtml(value: unknown): string {
-  return `<code>${escapeHtml(value)}</code>`;
-}
-
-function formatCount(value: unknown): string {
-  const number = Number(value ?? 0);
-  return Number.isFinite(number) ? new Intl.NumberFormat("en-US").format(number) : "0";
-}
-
-function formatDuration(totalSeconds: unknown): string {
-  const seconds = Math.max(0, Math.floor(Number(totalSeconds ?? 0)));
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return `${seconds}s`;
-}
-
-function serviceIcon(state: unknown): string {
-  const value = String(state ?? "").toLowerCase();
-  if (["healthy", "running", "online", "ready", "success"].includes(value)) return "✅";
-  if (["failed", "error", "unhealthy", "offline"].includes(value)) return "❌";
-  if (["stopped", "inactive", "idle"].includes(value)) return "⚪";
-  if (["starting", "updating", "running-update"].includes(value)) return "🔄";
-  return "⚠️";
-}
 
 async function sendMessage(
   chatId: number,
@@ -65,7 +44,7 @@ async function sendMessage(
   });
 }
 
-await bot.setMyCommands([
+const BOT_COMMANDS = [
   { command: "status", description: "TunnelBlock status" },
   { command: "diag", description: "System diagnostics" },
   { command: "domains", description: "Manage domains" },
@@ -77,11 +56,24 @@ await bot.setMyCommands([
   { command: "update", description: "Update TunnelBlock" },
   { command: "update_status", description: "Update progress" },
   { command: "help", description: "Command overview" },
-]);
+];
 
-function isAllowed(userId?: number): boolean {
-  if (!userId) return false;
-  return allowed.has(String(userId));
+const commandChats = new Set<number>();
+
+async function ensureCommandsForChat(chatId: number): Promise<void> {
+  if (commandChats.has(chatId)) return;
+  await bot.setMyCommands(BOT_COMMANDS, {
+    scope: { type: "chat", chat_id: chatId },
+  });
+  commandChats.add(chatId);
+}
+
+// No global command menu: unauthorized users should not see the control surface.
+await bot.setMyCommands([]);
+for (const rawUserId of allowed) {
+  const chatId = Number(rawUserId);
+  if (!Number.isSafeInteger(chatId)) continue;
+  await ensureCommandsForChat(chatId).catch(() => {});
 }
 
 async function requestJson(base: string, path: string, init?: RequestInit) {
@@ -130,13 +122,6 @@ async function updaterApi(path: string, init?: RequestInit) {
 
 const DOMAINS_PAGE_SIZE = 8;
 
-function stateIcon(state: string): string {
-  if (state === "allow") return "✅";
-  if (state === "block") return "🚫";
-  if (state === "list") return "📚";
-  return "⚪";
-}
-
 async function getDomainsPage(page: number) {
   const safePage = Math.max(0, Math.floor(page));
   const offset = safePage * DOMAINS_PAGE_SIZE;
@@ -154,88 +139,6 @@ async function getDomainsPage(page: number) {
     total,
     page: normalizedPage,
     pageCount,
-  };
-}
-
-function domainsListView(data: any) {
-  const rows = (data.items ?? []).map((item: any) => ([{
-    text: `${stateIcon(item.state)} ${item.domain} · ${formatCount(item.count)}`,
-    callback_data: `domains:d:${item.key}:${data.page}`,
-  }]));
-
-  const nav: any[] = [];
-  if (data.page > 0) {
-    nav.push({ text: "⬅️", callback_data: `domains:p:${data.page - 1}` });
-  }
-  nav.push({ text: `${data.page + 1}/${data.pageCount}`, callback_data: "domains:noop" });
-  if (data.page < data.pageCount - 1) {
-    nav.push({ text: "➡️", callback_data: `domains:p:${data.page + 1}` });
-  }
-  rows.push(nav);
-
-  return {
-    text: [
-      "🌐 <b>Observed Domains</b>",
-      "",
-      `<b>${formatCount(data.total)}</b> domains · page ${data.page + 1}/${data.pageCount}`,
-      "Tap a domain to inspect or change its rule.",
-    ].join("\n"),
-    reply_markup: { inline_keyboard: rows },
-  };
-}
-
-function domainStateLabel(state: string): string {
-  if (state === "allow") return "Manual allow";
-  if (state === "block") return "Manual block";
-  if (state === "list") return "Blocklist";
-  return "Default";
-}
-
-function domainDetailView(item: any, page: number) {
-  const lines = [
-    `🌐 <b>${escapeHtml(item.domain)}</b>`,
-    "",
-    `<b>Decision</b>  ${item.decision === "block" ? "🚫 BLOCK" : "✅ ALLOW"}`,
-    `<b>Source</b>    ${escapeHtml(domainStateLabel(item.state))}`,
-    `<b>Queries</b>   ${formatCount(item.count)}`,
-  ];
-
-  if (item.matchedRule) {
-    lines.push(`<b>Rule</b>      ${codeHtml(item.matchedRule)}`);
-  }
-
-  const matchingLists = Array.isArray(item.blocklists)
-    ? item.blocklists
-    : item.blocklist
-      ? [item.blocklist]
-      : [];
-
-  if (matchingLists.length) {
-    lines.push("", `📚 <b>Blocklist matches (${matchingLists.length})</b>`);
-
-    for (const match of matchingLists.slice(0, 5)) {
-      lines.push(
-        `• ${escapeHtml(shortListName(match.url))} → ${codeHtml(match.matchedRule ?? item.domain)}`,
-      );
-    }
-
-    if (matchingLists.length > 5) {
-      lines.push(`• … ${matchingLists.length - 5} more`);
-    }
-  }
-
-  return {
-    text: lines.join("\n"),
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "⚪ Default", callback_data: `domains:r:default:${item.key}:${page}` },
-          { text: "✅ Allow", callback_data: `domains:r:allow:${item.key}:${page}` },
-          { text: "🚫 Block", callback_data: `domains:r:block:${item.key}:${page}` },
-        ],
-        [{ text: "⬅️ Domains", callback_data: `domains:p:${page}` }],
-      ],
-    },
   };
 }
 
@@ -286,102 +189,8 @@ async function editVpnHome(chatId: number, messageId: number) {
   await bot.editMessageText(view.text, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: view.reply_markup });
 }
 
-function shortListName(urlValue: string): string {
-  try {
-    const url = new URL(urlValue);
-    const tail = url.pathname.split("/").filter(Boolean).pop();
-    const value = tail ? `${url.hostname}/${tail}` : url.hostname;
-    return value.length > 38 ? value.slice(0, 35) + "…" : value;
-  } catch {
-    return urlValue.slice(0, 38);
-  }
-}
-
-function formatListDate(value: string | null): string {
-  if (!value) return "never";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-GB");
-}
-
 async function getLists() {
   return api("/admin/lists");
-}
-
-function listsView(data: any) {
-  const items = data.items ?? [];
-  const rows = items.map((item: any) => ([{
-    text: `${item.lastError ? "⚠️" : item.enabled ? "✅" : "⏸"} ${shortListName(item.url)} · ${formatCount(item.cachedDomainCount ?? item.domainCount)}`,
-    callback_data: `lists:d:${item.id}`,
-  }]));
-
-  rows.push([
-    { text: "➕ Add", callback_data: "lists:add" },
-    { text: "🔄 Refresh all", callback_data: "lists:refresh" },
-  ]);
-
-  const activeCount = Number(data.activeCount ?? items.filter((item: any) => item.enabled).length);
-  const duplicateEntries = Number(data.duplicateEntries ?? 0);
-  const unhealthyCount = Number(data.unhealthyCount ?? items.filter((item: any) => item.lastError).length);
-
-  return {
-    text: [
-      "📚 <b>External Blocklists</b>",
-      "",
-      `✅ Active: <b>${activeCount}/${items.length}</b>`,
-      `🧱 Unique domains: <b>${formatCount(data.combinedDomainCount ?? 0)}</b>`,
-      `🔁 Duplicate entries: <b>${formatCount(duplicateEntries)}</b>`,
-      `${unhealthyCount ? "⚠️" : "✅"} Errors: <b>${formatCount(unhealthyCount)}</b>`,
-      "",
-      items.length
-        ? "Select a list to inspect coverage and status."
-        : "No external blocklists configured. Manual rules remain active.",
-    ].join("\n"),
-    reply_markup: { inline_keyboard: rows },
-  };
-}
-
-function listDetailView(item: any) {
-  const status = item.lastError ? "⚠️ Error" : item.enabled ? "✅ Active" : "⏸ Disabled";
-  const coverage = item.enabled
-    ? [
-        `Cached domains: <b>${formatCount(item.cachedDomainCount ?? item.domainCount)}</b>`,
-        `Unique to this list: <b>${formatCount(item.uniqueDomainCount ?? 0)}</b>`,
-        `Shared with other lists: <b>${formatCount(item.overlapDomainCount ?? 0)}</b>`,
-      ]
-    : [
-        `Cached domains: <b>${formatCount(item.cachedDomainCount ?? item.domainCount)}</b>`,
-        "Active coverage: <b>disabled</b>",
-      ];
-
-  return {
-    text: [
-      `📚 <b>${escapeHtml(shortListName(item.url))}</b>`,
-      "",
-      `<b>Status</b>  ${status}`,
-      `<b>URL</b>     ${codeHtml(item.url)}`,
-      "",
-      "<b>Coverage</b>",
-      ...coverage,
-      "",
-      `Last update: ${escapeHtml(formatListDate(item.updatedAt))}`,
-      item.lastError
-        ? `⚠️ ${escapeHtml(item.lastError)}`
-        : "✅ No errors reported",
-    ].join("\n"),
-    reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: item.enabled ? "⏸ Disable" : "▶️ Enable",
-            callback_data: `lists:e:${item.id}:${item.enabled ? 0 : 1}`,
-          },
-          { text: "🔄 Refresh", callback_data: `lists:r:${item.id}` },
-        ],
-        [{ text: "🗑 Remove", callback_data: `lists:c:${item.id}` }],
-        [{ text: "⬅️ Blocklists", callback_data: "lists:home" }],
-      ],
-    },
-  };
 }
 
 async function editListsHome(chatId: number, messageId: number) {
@@ -400,130 +209,8 @@ async function getListById(id: string) {
   return (data.items ?? []).find((item: any) => item.id === id);
 }
 
-function topSourceLabel(item: any): string {
-  if (item.source === "manual-block") return "🚫 manuale";
-  if (item.source === "manual-allow") return "✅ manuale";
-
-  if (item.source === "external-block") {
-    const matches = Array.isArray(item.blocklists) ? item.blocklists : [];
-    if (!matches.length) return "📚 blocklist";
-    const suffix = matches.length > 1 ? ` +${matches.length - 1}` : "";
-    return `📚 ${shortListName(matches[0].url)}${suffix}`;
-  }
-
-  return "⚪ default";
-}
-
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0 B";
-  if (value < 1024) return `${Math.round(value)} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
-}
-
-function integrationRuntimeLabel(item: any, runtime: any): string {
-  if (runtime?.active && runtime.integration === item.id) {
-    return `🟢 ${String(runtime.mode ?? "active").toUpperCase()}`;
-  }
-  return "⚪ Inactive";
-}
-
 async function getIntegrations() {
   return updaterApi("/integrations");
-}
-
-function integrationsHomeView(data: any) {
-  const items = Array.isArray(data.items) ? data.items : [];
-  const runtime = data.runtime ?? {};
-  const rows = items.map((item: any) => ([{
-    text: `${runtime.active && runtime.integration === item.id ? "🟢" : "⚪"} ${item.name}`,
-    callback_data: `integrations:d:${item.id}`,
-  }]));
-
-  const activeText = runtime.active
-    ? `${escapeHtml(runtime.integration)} · ${escapeHtml(String(runtime.mode ?? "").toUpperCase())}`
-    : "None";
-
-  return {
-    text: [
-      "🧩 <b>HTTPS Integrations</b>",
-      "",
-      `<b>CA</b>       ${runtime.caReady ? "✅ Ready" : "❌ Not prepared"}`,
-      `<b>Active</b>   ${activeText}`,
-      `<b>Proxy</b>    ${escapeHtml(runtime.proxyState ?? "unknown")}`,
-      `<b>HTTPS</b>    ${escapeHtml(runtime.interception ?? "unknown")}`,
-      `<b>QUIC</b>     ${escapeHtml(runtime.quic ?? "unknown")}`,
-      "",
-      items.length
-        ? "Choose an integration to view its actions."
-        : "No integrations registered.",
-      "",
-      "ℹ️ The CA is only required for explicit HTTPS inspection tests.",
-    ].join("\n"),
-    reply_markup: { inline_keyboard: rows },
-  };
-}
-
-function integrationDetailView(item: any, runtime: any) {
-  const activeHere = Boolean(runtime?.active && runtime.integration === item.id);
-  const rows: any[][] = [];
-
-  for (const action of Array.isArray(item.actions) ? item.actions : []) {
-    if (action.visibleWhen === "active" && !activeHere) continue;
-    if (action.visibleWhen === "inactive" && activeHere) continue;
-    rows.push([{ text: action.label, callback_data: `integrations:a:${item.id}:${action.id}` }]);
-  }
-  rows.push([{ text: "⬅️ Integrations", callback_data: "integrations:home" }]);
-
-  const observation = item.observation ?? {};
-  const modifiedAt = observation.modifiedAt
-    ? new Date(observation.modifiedAt).toLocaleString("it-IT")
-    : "never";
-
-  return {
-    text: [
-      `🧩 <b>${escapeHtml(item.name)}</b>`,
-      `${integrationRuntimeLabel(item, runtime)}`,
-      "",
-      escapeHtml(item.description ?? ""),
-      "",
-      `<b>Strategy</b>  ${escapeHtml(item.status ?? "experimental")}`,
-      `<b>CA</b>        ${runtime?.caReady ? "✅ Ready" : "❌ Not prepared"}`,
-      `<b>Log</b>       ${formatBytes(Number(observation.bytes ?? 0))}`,
-      `<b>Updated</b>   ${escapeHtml(modifiedAt)}`,
-      "",
-      activeHere
-        ? "🟢 HTTPS inspection is active for this device."
-        : runtime?.caReady
-          ? "ℹ️ Verify that the CA is installed and trusted before starting."
-          : "ℹ️ Prepare and install the CA from the Integrations menu first.",
-    ].join("\n"),
-    reply_markup: { inline_keyboard: rows },
-  };
-}
-
-function httpsSummaryText(name: string, summary: any): string {
-  const interpretation = Number(summary.httpRequests) > 0
-    ? "✅ HTTPS was readable for at least part of the traffic."
-    : summary.likelyCertificatePinning
-      ? "⚠️ Result is compatible with certificate pinning or CA rejection."
-      : "ℹ️ Not enough data to evaluate TLS inspection.";
-
-  return [
-    `📊 <b>${escapeHtml(name)}</b>`,
-    "",
-    "<b>TLS</b>",
-    `• ClientHello: <b>${formatCount(summary.tlsClientHello ?? 0)}</b>`,
-    `• Established: <b>${formatCount(summary.tlsEstablished ?? 0)}</b>`,
-    `• Failed: <b>${formatCount(summary.tlsFailed ?? 0)}</b>`,
-    "",
-    "<b>HTTP visibility</b>",
-    `• Requests: <b>${formatCount(summary.httpRequests ?? 0)}</b>`,
-    `• Responses: <b>${formatCount(summary.httpResponses ?? 0)}</b>`,
-    `• HTTPS hosts: <b>${formatCount(summary.uniqueHosts ?? 0)}</b>`,
-    "",
-    interpretation,
-  ].join("\n");
 }
 
 async function editIntegrationsHome(chatId: number, messageId: number) {
@@ -554,38 +241,23 @@ async function editIntegrationDetail(chatId: number, messageId: number, id: stri
 }
 
 
-function helpText(): string {
-  return [
-    "🛡 <b>TunnelBlock</b>",
-    "VPN, DNS and privacy control center.",
-    "",
-    "<b>Monitoring</b>",
-    "/status — VPN & DNS overview",
-    "/diag — system diagnostics",
-    "/topblocked — most blocked domains",
-    "/topallowed — most requested domains",
-    "",
-    "<b>Management</b>",
-    "/domains — domain rules",
-    "/lists — external blocklists",
-    "/vpn — VPN users",
-    "/integrations — HTTPS integrations",
-    "",
-    "<b>System</b>",
-    "/reload — reload DNS rules",
-    "/update — update TunnelBlock",
-    "/update_status — update progress",
-    "/help — show this overview",
-  ].join("\n");
-}
-
 bot.on("callback_query", async query => {
   const userId = query.from.id;
   const chatId = query.message?.chat.id;
   const messageId = query.message?.message_id;
   const data = query.data ?? "";
 
-  if (!chatId || !messageId || !isAllowed(userId)) {
+  if (!chatId || !messageId) {
+    await bot.answerCallbackQuery(query.id, { text: "Unavailable." });
+    return;
+  }
+
+  if (!isPrivateChat(query.message?.chat.type)) {
+    await bot.answerCallbackQuery(query.id, { text: "Private chat only." });
+    return;
+  }
+
+  if (!isAllowedUser(allowed, userId)) {
     await bot.answerCallbackQuery(query.id, { text: "Unauthorized." });
     return;
   }
@@ -636,6 +308,7 @@ bot.on("callback_query", async query => {
       const peer = peers.find((p: any) => p.name === vpnDetail[1]);
       if (!peer) {
         await editVpnHome(chatId, messageId);
+        await bot.answerCallbackQuery(query.id, { text: "User no longer exists." });
         return;
       }
 
@@ -735,6 +408,7 @@ bot.on("callback_query", async query => {
       await bot.editMessageText(view.text, {
         chat_id: chatId,
         message_id: messageId,
+        parse_mode: "HTML",
         reply_markup: view.reply_markup,
       });
       await bot.answerCallbackQuery(query.id);
@@ -752,6 +426,7 @@ bot.on("callback_query", async query => {
       await bot.editMessageText(view.text, {
         chat_id: chatId,
         message_id: messageId,
+        parse_mode: "HTML",
         reply_markup: view.reply_markup,
       });
       await bot.answerCallbackQuery(query.id, {
@@ -771,6 +446,7 @@ bot.on("callback_query", async query => {
       await bot.editMessageText(view.text, {
         chat_id: chatId,
         message_id: messageId,
+        parse_mode: "HTML",
         reply_markup: view.reply_markup,
       });
       return;
@@ -838,6 +514,7 @@ bot.on("callback_query", async query => {
       await bot.editMessageText(view.text, {
         chat_id: chatId,
         message_id: messageId,
+        parse_mode: "HTML",
         reply_markup: view.reply_markup,
       });
       await bot.answerCallbackQuery(query.id);
@@ -865,6 +542,7 @@ bot.on("callback_query", async query => {
       await bot.editMessageText(view.text, {
         chat_id: chatId,
         message_id: messageId,
+        parse_mode: "HTML",
         reply_markup: view.reply_markup,
       });
 
@@ -888,10 +566,15 @@ bot.on("message", async msg => {
   const userId = msg.from?.id;
   const text = (msg.text ?? "").trim();
 
-  if (!isAllowed(userId)) {
+  // Never expose VPN, DNS or certificate data in groups/channels.
+  if (!isPrivateChat(msg.chat.type)) return;
+
+  if (!isAllowedUser(allowed, userId)) {
     await sendMessage(chatId, "⛔ <b>Unauthorized</b>\n\nThis bot is restricted to approved users.");
     return;
   }
+
+  await ensureCommandsForChat(chatId).catch(() => {});
 
   try {
     const pendingPeerMessageId = pendingPeerAdd.get(chatId);
@@ -946,26 +629,7 @@ bot.on("message", async msg => {
 
     if (text === "/status") {
       const status = await api("/admin/status");
-      const listErrors = Number(status.blocklistErrors ?? 0);
-
-      await sendMessage(chatId, [
-        "🛡 <b>TunnelBlock Status</b>",
-        "",
-        "<b>VPN & DNS</b>",
-        `• Resolver: ${status.ok ? "✅ Online" : "❌ Offline"}`,
-        `• Uptime: <b>${formatDuration(status.uptimeSec)}</b>`,
-        "",
-        "<b>Traffic</b>",
-        `• Queries: <b>${formatCount(status.queries)}</b>`,
-        `• Blocked: <b>${formatCount(status.blocked)}</b>`,
-        `• Block rate: <b>${escapeHtml(status.blockRate ?? 0)}%</b>`,
-        "",
-        "<b>Blocklists</b>",
-        `• Active: <b>${formatCount(status.blocklists ?? 0)}</b>`,
-        `• Unique domains: <b>${formatCount(status.externalBlockedDomains ?? 0)}</b>`,
-        `• Duplicates: <b>${formatCount(status.blocklistDuplicateEntries ?? 0)}</b>`,
-        `• Errors: ${listErrors ? "⚠️" : "✅"} <b>${formatCount(listErrors)}</b>`,
-      ].join("\n"));
+      await sendMessage(chatId, statusText(status));
       return;
     }
 
@@ -1012,18 +676,13 @@ bot.on("message", async msg => {
           ]
         : [];
 
-      await sendMessage(chatId, [
-        "🩺 <b>Diagnostics</b>",
-        "",
-        `<b>Resolver</b>  ${health}`,
-        `<b>Storage</b>   ${ready}`,
-        `<b>Updater</b>   ${updaterLine}`,
-        "",
-        "<b>Services</b>",
-        ...(serviceLines.length ? serviceLines.map(line => `• ${line}`) : ["• Service details unavailable"]),
-        "",
-        `<b>Runtime</b>\n${runtimeLine}`,
-      ].join("\n"));
+      await sendMessage(chatId, diagnosticsText({
+        health,
+        ready,
+        updaterLine,
+        serviceLines,
+        runtimeLine,
+      }));
       return;
     }
 
@@ -1103,25 +762,8 @@ bot.on("message", async msg => {
     }
 
     if (text === "/update_status") {
-      const s = await updaterApi("/status");
-      const state = s.running
-        ? "running"
-        : s.lastSuccess === true
-          ? "success"
-          : s.lastSuccess === false
-            ? "failed"
-            : "idle";
-      const icon = state === "running" ? "🔄" : state === "success" ? "✅" : state === "failed" ? "❌" : "⚪";
-      const output = typeof s.lastOutput === "string" ? s.lastOutput.slice(-2500) : "";
-
-      await sendMessage(chatId, [
-        `${icon} <b>Update Status</b>`,
-        "",
-        `<b>State</b>     ${escapeHtml(state)}`,
-        `<b>Started</b>   ${escapeHtml(s.lastStartedAt ?? "-")}`,
-        `<b>Finished</b>  ${escapeHtml(s.lastFinishedAt ?? "-")}`,
-        output ? `\n<b>Latest output</b>\n<pre>${escapeHtml(output)}</pre>` : "",
-      ].filter(Boolean).join("\n"));
+      const status = await updaterApi("/status");
+      await sendMessage(chatId, updateStatusText(status));
       return;
     }
 
