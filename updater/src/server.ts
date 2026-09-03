@@ -352,6 +352,13 @@ async function httpsProxyRuntimeState(): Promise<string> {
     const containerId = idOutput.trim();
     if (!containerId) return "stopped";
 
+    const { stdout: runningOutput } = await execFileAsync(
+      "docker",
+      ["inspect", "--format", "{{.State.Running}}", containerId],
+      { cwd: repoDir, env: process.env },
+    );
+    if (runningOutput.trim() !== "true") return "stopped";
+
     const { stdout: stateOutput } = await execFileAsync(
       "docker",
       [
