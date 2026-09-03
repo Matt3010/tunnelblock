@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import TelegramBot from "node-telegram-bot-api";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -14,81 +12,17 @@ const allowed = new Set(
     .filter(Boolean),
 );
 
-const cleanupIntervalMs = Number(process.env.TELEGRAM_CLEANUP_INTERVAL_HOURS ?? 12) * 60 * 60 * 1000;
-const cleanupDataDir = process.env.TELEGRAM_DATA_DIR ?? "/telegram-data";
-const cleanupFile = path.join(cleanupDataDir, "messages.json");
-
-type TrackedMessage = {
-  chatId: number;
-  messageId: number;
-  createdAt: number;
-};
-
-fs.mkdirSync(cleanupDataDir, { recursive: true });
-
-function loadTrackedMessages(): TrackedMessage[] {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(cleanupFile, "utf8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-let trackedMessages: TrackedMessage[] = loadTrackedMessages();
-
-function persistTrackedMessages() {
-  const tmp = `${cleanupFile}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(trackedMessages));
-  fs.renameSync(tmp, cleanupFile);
-}
-
-function trackMessage(chatId: number, messageId: number, createdAt = Date.now()) {
-  if (trackedMessages.some(item => item.chatId === chatId && item.messageId === messageId)) return;
-  trackedMessages.push({ chatId, messageId, createdAt });
-  persistTrackedMessages();
-}
-
 if (!token) throw new Error("TELEGRAM_BOT_TOKEN is required");
 if (!adminToken) throw new Error("ADMIN_API_TOKEN is required");
 
 const bot = new TelegramBot(token, { polling: true });
 
-async function sendTrackedMessage(
+async function sendMessage(
   chatId: number,
   text: string,
   options?: TelegramBot.SendMessageOptions,
 ) {
-  const sent = await bot.sendMessage(chatId, text, options);
-  trackMessage(sent.chat.id, sent.message_id, (sent.date ?? Math.floor(Date.now() / 1000)) * 1000);
-  return sent;
-}
-
-async function cleanupTrackedMessages() {
-  if (trackedMessages.length === 0) return;
-
-  const snapshot = [...trackedMessages];
-  const remaining: TrackedMessage[] = [];
-
-  for (const item of snapshot) {
-    try {
-      await bot.deleteMessage(item.chatId, item.messageId);
-    } catch (error: any) {
-      const ageMs = Date.now() - item.createdAt;
-      const description = String(error?.response?.body?.description ?? error?.message ?? error);
-
-      // Telegram cannot delete messages older than 48 hours. Do not retry those forever.
-      if (ageMs < 48 * 60 * 60 * 1000 && !/message to delete not found/i.test(description)) {
-        remaining.push(item);
-      }
-    }
-
-    // Avoid hammering the Telegram API when /domains has produced many messages.
-    await new Promise(resolve => setTimeout(resolve, 40));
-  }
-
-  trackedMessages = remaining;
-  persistTrackedMessages();
+  return bot.sendMessage(chatId, text, options);
 }
 
 await bot.setMyCommands([
@@ -596,15 +530,14 @@ bot.on("callback_query", async query => {
       });
       if (result.certificate) {
         const certificate = result.certificate;
-        const sent = await bot.sendDocument(chatId, Buffer.from(certificate.base64, "base64"), {
+        await bot.sendDocument(chatId, Buffer.from(certificate.base64, "base64"), {
           caption: `TunnelBlock HTTPS CA\nSHA-256: ${certificate.fingerprint256}\n\nInstall and trust this certificate only on a dedicated test device. It is not required for DNS blocking.`,
         }, { filename: certificate.filename, contentType: certificate.contentType });
-        trackMessage(sent.chat.id, sent.message_id);
       }
       if (result.summary) {
         const dataNow = await getIntegrations();
         const item = (dataNow.items ?? []).find((candidate: any) => candidate.id === id);
-        await sendTrackedMessage(chatId, httpsSummaryText(item?.name ?? id, result.summary));
+        await sendMessage(chatId, httpsSummaryText(item?.name ?? id, result.summary));
       }
       await editIntegrationDetail(chatId, messageId, id);
       return;
@@ -617,9 +550,9 @@ bot.on("callback_query", async query => {
     const vpnEnable = data.match(/^vpn:e:([A-Za-z0-9_-]{1,32}):(0|1)$/);
     if (vpnEnable) { await updaterApi(`/vpn/peers/${vpnEnable[1]}/${vpnEnable[2] === "1" ? "enable" : "disable"}`, { method: "POST", body: "{}" }); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id, { text: "Status updated" }); return; }
     const vpnConfig = data.match(/^vpn:c:([A-Za-z0-9_-]{1,32})$/);
-    if (vpnConfig) { const result = await updaterApi(`/vpn/peers/${vpnConfig[1]}/config`); const sent = await bot.sendDocument(chatId, Buffer.from(result.config), {}, { filename: `${vpnConfig[1]}.conf`, contentType: "text/plain" }); trackMessage(sent.chat.id, sent.message_id); await bot.answerCallbackQuery(query.id); return; }
+    if (vpnConfig) { const result = await updaterApi(`/vpn/peers/${vpnConfig[1]}/config`); await bot.sendDocument(chatId, Buffer.from(result.config), {}, { filename: `${vpnConfig[1]}.conf`, contentType: "text/plain" }); await bot.answerCallbackQuery(query.id); return; }
     const vpnQr = data.match(/^vpn:g:([A-Za-z0-9_-]{1,32})$/);
-    if (vpnQr) { const result = await updaterApi(`/vpn/peers/${vpnQr[1]}/qr`); const sent = await bot.sendPhoto(chatId, Buffer.from(result.pngBase64, "base64"), { caption: `QR WireGuard · ${vpnQr[1]}` }, { filename: `${vpnQr[1]}.png`, contentType: "image/png" }); trackMessage(sent.chat.id, sent.message_id); await bot.answerCallbackQuery(query.id); return; }
+    if (vpnQr) { const result = await updaterApi(`/vpn/peers/${vpnQr[1]}/qr`); await bot.sendPhoto(chatId, Buffer.from(result.pngBase64, "base64"), { caption: `QR WireGuard · ${vpnQr[1]}` }, { filename: `${vpnQr[1]}.png`, contentType: "image/png" }); await bot.answerCallbackQuery(query.id); return; }
     const vpnRotate = data.match(/^vpn:r:([A-Za-z0-9_-]{1,32})$/);
     if (vpnRotate) { await updaterApi(`/vpn/peers/${vpnRotate[1]}/rotate`, { method: "POST", body: "{}" }); await bot.answerCallbackQuery(query.id, { text: "Keys rotated: download the new configuration", show_alert: true }); return; }
     const vpnConfirm = data.match(/^vpn:q:([A-Za-z0-9_-]{1,32})$/);
@@ -834,10 +767,8 @@ bot.on("message", async msg => {
   const userId = msg.from?.id;
   const text = (msg.text ?? "").trim();
 
-  trackMessage(chatId, msg.message_id, (msg.date ?? Math.floor(Date.now() / 1000)) * 1000);
-
   if (!isAllowed(userId)) {
-    await sendTrackedMessage(chatId, "Unauthorized.");
+    await sendMessage(chatId, "Unauthorized.");
     return;
   }
 
@@ -846,9 +777,8 @@ bot.on("message", async msg => {
     if (pendingPeerMessageId !== undefined && !text.startsWith("/")) {
       const peer = await updaterApi("/vpn/peers", { method: "POST", body: JSON.stringify({ name: text }) });
       pendingPeerAdd.delete(chatId);
-      await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
       await editVpnHome(chatId, pendingPeerMessageId);
-      await sendTrackedMessage(chatId, [
+      await sendMessage(chatId, [
         `✅ VPN user created: ${peer.name ?? text}`,
         "",
         "1. Install the official WireGuard app on iOS or Android.",
@@ -873,14 +803,10 @@ bot.on("message", async msg => {
           });
           pendingListAdd.delete(chatId);
 
-          try {
-            await bot.deleteMessage(chatId, msg.message_id);
-          } catch {}
-
           await editListsHome(chatId, pendingMessageId);
            return;
         } catch (error) {
-          await sendTrackedMessage(
+          await sendMessage(
             chatId,
             `Unable to add blocklist: ${error instanceof Error ? error.message : String(error)}\n\nSend another HTTPS URL or use /lists to cancel.`,
           );
@@ -890,13 +816,13 @@ bot.on("message", async msg => {
     }
 
     if (text === "/start" || text === "/help") {
-      await sendTrackedMessage(chatId, helpText());
+      await sendMessage(chatId, helpText());
       return;
     }
 
     if (text === "/status") {
       const status = await api("/admin/status");
-      await sendTrackedMessage(chatId,
+      await sendMessage(chatId,
         `VPN DNS: ${status.ok ? "online" : "offline"}\nUptime: ${status.uptimeSec}s\nQueries: ${status.queries}\nBlocked: ${status.blocked}\nBlock rate: ${status.blockRate}%\nActive blocklists: ${status.blocklists ?? 0}\nUnique external domains: ${status.externalBlockedDomains ?? 0}\nDuplicates across lists: ${status.blocklistDuplicateEntries ?? 0}\nLists with errors: ${status.blocklistErrors ?? 0}`
       );
       return;
@@ -935,7 +861,7 @@ bot.on("message", async msg => {
           ]
         : [];
 
-      await sendTrackedMessage(
+      await sendMessage(
         chatId,
         [
           "🩺 Diagnostics",
@@ -953,12 +879,12 @@ bot.on("message", async msg => {
       const data = await getDomainsPage(0);
 
       if (!data.items.length) {
-        await sendTrackedMessage(chatId, "No observed domains.");
+        await sendMessage(chatId, "No observed domains.");
         return;
       }
 
       const view = domainsListView(data);
-      await sendTrackedMessage(chatId, view.text, {
+      await sendMessage(chatId, view.text, {
         reply_markup: view.reply_markup,
       });
       return;
@@ -968,20 +894,20 @@ bot.on("message", async msg => {
       pendingListAdd.delete(chatId);
       const data = await getLists();
       const view = listsView(data);
-      await sendTrackedMessage(chatId, view.text, {
+      await sendMessage(chatId, view.text, {
         reply_markup: view.reply_markup,
       });
       return;
     }
 
     if (text === "/vpn") {
-      pendingPeerAdd.delete(chatId); const view = await vpnView(); await sendTrackedMessage(chatId, view.text, { reply_markup: view.reply_markup }); return;
+      pendingPeerAdd.delete(chatId); const view = await vpnView(); await sendMessage(chatId, view.text, { reply_markup: view.reply_markup }); return;
     }
 
     if (text === "/integrations" || text === "/integrazioni") {
       const data = await getIntegrations();
       const view = integrationsHomeView(data);
-      await sendTrackedMessage(chatId, view.text, { reply_markup: view.reply_markup });
+      await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
       return;
     }
 
@@ -993,7 +919,7 @@ bot.on("message", async msg => {
           : "";
         return `${i + 1}. ${x.domain} — ${x.count} · ${topSourceLabel(x)}${rule}`;
       });
-      await sendTrackedMessage(chatId, lines.length ? lines.join("\n") : "No blocked domains yet.");
+      await sendMessage(chatId, lines.length ? lines.join("\n") : "No blocked domains yet.");
       return;
     }
 
@@ -1002,19 +928,19 @@ bot.on("message", async msg => {
       const lines = (s.items ?? []).map((x: any, i: number) =>
         `${i + 1}. ${x.domain} — ${x.count} · ${topSourceLabel(x)}`
       );
-      await sendTrackedMessage(chatId, lines.length ? lines.join("\n") : "No allowed domains yet.");
+      await sendMessage(chatId, lines.length ? lines.join("\n") : "No allowed domains yet.");
       return;
     }
 
     if (text === "/reload") {
       await api("/admin/reload", { method: "POST", body: "{}" });
-      await sendTrackedMessage(chatId, "Rules reloaded.");
+      await sendMessage(chatId, "Rules reloaded.");
       return;
     }
 
     if (text === "/update") {
       await updaterApi("/update", { method: "POST", body: "{}" });
-      await sendTrackedMessage(chatId, "Update started. Use /update_status to follow progress.");
+      await sendMessage(chatId, "Update started. Use /update_status to follow progress.");
       return;
     }
 
@@ -1022,19 +948,14 @@ bot.on("message", async msg => {
       const s = await updaterApi("/status");
       const state = s.running ? "running" : (s.lastSuccess === true ? "success" : (s.lastSuccess === false ? "failed" : "idle"));
       const output = typeof s.lastOutput === "string" ? s.lastOutput.slice(-2500) : "";
-      await sendTrackedMessage(chatId,
+      await sendMessage(chatId,
         `Update: ${state}\nStarted: ${s.lastStartedAt ?? "-"}\nFinished: ${s.lastFinishedAt ?? "-"}${output ? "\n\n" + output : ""}`
       );
       return;
     }
 
-    await sendTrackedMessage(chatId, helpText());
+    await sendMessage(chatId, helpText());
   } catch (error) {
-    await sendTrackedMessage(chatId, `Error: ${error instanceof Error ? error.message : String(error)}`);
+    await sendMessage(chatId, `Error: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
-
-
-setInterval(() => {
-  void cleanupTrackedMessages();
-}, cleanupIntervalMs);
