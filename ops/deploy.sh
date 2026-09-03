@@ -112,6 +112,7 @@ configure_wireguard_dns_upstreams() {
 
     test -s "$TMP_FILE"
     mv "$TMP_FILE" "$SERVERS_FILE"
+    chmod 0644 "$SERVERS_FILE"
     kill -HUP "$(pidof dnsmasq)"
   ' >>"$LOG_FILE" 2>&1
 }
