@@ -146,7 +146,7 @@ services:
       PORT: 8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      GIT_BRANCH: master
+      GIT_BRANCH: ${UPDATE_BRANCH:-master}
       REPO_DIR: /workspace
       COMPOSE_PROJECT_NAME: adblock-general-purpose
       AUTO_UPDATE_INTERVAL_SEC: 300
