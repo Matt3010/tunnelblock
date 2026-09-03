@@ -7,6 +7,21 @@ export function escapeHtml(value: unknown): string {
     .replace(/>/g, "&gt;");
 }
 
+function escapeHtmlTail(value: unknown, maxEscapedLength: number): string {
+  const chars = Array.from(String(value ?? ""));
+  const escapedTail: string[] = [];
+  let length = 0;
+
+  for (let index = chars.length - 1; index >= 0; index--) {
+    const escaped = escapeHtml(chars[index]);
+    if (length + escaped.length > maxEscapedLength) break;
+    escapedTail.push(escaped);
+    length += escaped.length;
+  }
+
+  return escapedTail.reverse().join("");
+}
+
 export function codeHtml(value: unknown): string {
   return `<code>${escapeHtml(value)}</code>`;
 }
@@ -398,7 +413,9 @@ export function updateStatusText(state: any): string {
         ? "failed"
         : "idle";
   const icon = value === "running" ? "🔄" : value === "success" ? "✅" : value === "failed" ? "❌" : "⚪";
-  const output = typeof state.lastOutput === "string" ? state.lastOutput.slice(-2500) : "";
+  const output = typeof state.lastOutput === "string"
+    ? escapeHtmlTail(state.lastOutput, 2800)
+    : "";
 
   return [
     `${icon} <b>Update Status</b>`,
@@ -406,7 +423,7 @@ export function updateStatusText(state: any): string {
     `<b>State</b>     ${escapeHtml(value)}`,
     `<b>Started</b>   ${escapeHtml(state.lastStartedAt ?? "-")}`,
     `<b>Finished</b>  ${escapeHtml(state.lastFinishedAt ?? "-")}`,
-    output ? `\n<b>Latest output</b>\n<pre>${escapeHtml(output)}</pre>` : "",
+    output ? `\n<b>Latest output</b>\n<pre>${output}</pre>` : "",
   ].filter(Boolean).join("\n");
 }
 
