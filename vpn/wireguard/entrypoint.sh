@@ -203,6 +203,10 @@ for UPSTREAM in $DNS_UPSTREAMS; do
 done
 IFS="$OLD_IFS"
 
+# dnsmasq drops privileges after startup and must be able to reread this file on SIGHUP.
+# It contains only resolver endpoint addresses, not secrets.
+chmod 0644 "$DNSMASQ_SERVERS"
+
 cleanup() {
   set +e
   [ -n "${DNSMASQ_PID:-}" ] && kill "$DNSMASQ_PID" 2>/dev/null
