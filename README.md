@@ -13,6 +13,7 @@ no public DNS or administration endpoint is exposed.
 | QR and `.conf` onboarding | ✅ | ✅ |
 | Multiple VPN peers | ✅ | ✅ |
 | Telegram administration | ✅ | ✅ |
+| Per-user LAN access with network discovery | ✅ | ✅ |
 | Automatic updates with rollback | ✅ | ✅ |
 | Rolling DNS resolver updates | ✅ | ✅ |
 | HTTPS inspection | Experimental | Experimental |
@@ -107,6 +108,9 @@ The VPN provides:
 Normal filtering remains DNS-based. An opt-in HTTPS integration lab can temporarily intercept TLS traffic for registered application strategies; it is stopped by default and managed from Telegram.
 
 Use `/integrations` in the Telegram bot to manage registered app strategies and observation sessions. The registry is currently empty. Only the public CA certificate can be downloaded; its private key never leaves the Raspberry Pi.
+
+Use **LAN access** on a user in `/vpn` to choose which home-network devices and ports
+that user may reach; see [docs/LAN-ACCESS.md](docs/LAN-ACCESS.md).
 
 See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup and VPN verification, and [docs/HTTPS-INTEGRATIONS.md](docs/HTTPS-INTEGRATIONS.md) for the HTTPS strategy architecture and safety model.
 

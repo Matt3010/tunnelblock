@@ -134,6 +134,20 @@ services:
       retries: 5
       start_period: 10s
 
+  # On-demand LAN inventory for per-user VPN access rules. It needs the host
+  # network namespace to see the Raspberry's LAN; the updater runs it with
+  # `docker compose --profile tools run --rm lan-discovery`.
+  lan-discovery:
+    profiles:
+      - tools
+    build:
+      context: .
+      dockerfile: vpn/discovery/Dockerfile
+    restart: "no"
+    network_mode: host
+    cap_add:
+      - NET_RAW
+
   updater:
     image: adblock-general-purpose-updater:latest
     build:
@@ -151,10 +165,11 @@ services:
       COMPOSE_PROJECT_NAME: adblock-general-purpose
       AUTO_UPDATE_INTERVAL_SEC: 300
       LIST_REFRESH_INTERVAL_HOURS: 24
+      LAN_SCAN_INTERVAL_HOURS: 12
       UPDATER_STATE_FILE: /updater-data/state.json
       UPDATER_LOG_FILE: /updater-data/deploy.log
       UPDATER_DATA_VOLUME: adblock-general-purpose-updater-data
-      UPDATER_RUNTIME_GENERATION: "5"
+      UPDATER_RUNTIME_GENERATION: "6"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
     volumes:
@@ -188,7 +203,7 @@ services:
       ADMIN_API_BASE: http://doh-a:8053
       UPDATER_API_BASE: http://updater:8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-      BOT_RUNTIME_GENERATION: "7"
+      BOT_RUNTIME_GENERATION: "8"
 
 networks:
   vpn-egress:

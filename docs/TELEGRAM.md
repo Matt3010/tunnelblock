@@ -36,6 +36,8 @@ It talks only to the authenticated resolver/updater APIs on the Docker network.
 
 `/vpn` creates and manages platform-independent WireGuard peers. After creating a peer,
 the bot provides the same QR/config onboarding steps for iOS and Android.
+Each user has a **LAN access** screen to choose which home-network devices and ports
+they can reach, prefilled by automatic network discovery. See [LAN-ACCESS.md](LAN-ACCESS.md).
 
 `/integrations` renders the optional HTTPS strategy registry. The registry is currently
 empty and normal DNS filtering never requires a CA certificate.

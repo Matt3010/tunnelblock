@@ -124,6 +124,9 @@ fi
 # the VPN peer from pivoting into vpn-dns or any other Docker-attached network.
 iptables -P FORWARD DROP
 iptables -A FORWARD -i wg0 -o wg0 -j ACCEPT
+# Private (LAN) destinations are filtered per peer before the generic egress accept.
+/app/lan-acl.sh init
+iptables -A FORWARD -i wg0 -o "$EGRESS_IF" -j TB_LAN
 iptables -A FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT
 iptables -A FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables -t nat -A POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE
@@ -141,6 +144,8 @@ if [ "$IPV6_INTERFACE" -eq 1 ] && ip6tables -P FORWARD DROP 2>/dev/null; then
   fi
 
   if [ -n "$IPV6_EGRESS_IF" ]; then
+    /app/lan-acl.sh init6
+    ip6tables -A FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j TB_LAN
     ip6tables -A FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT
     ip6tables -A FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     if ip6tables -t nat -A POSTROUTING -s "$IPV6_SUBNET" -o "$IPV6_EGRESS_IF" -j MASQUERADE 2>/dev/null; then
@@ -157,6 +162,8 @@ else
   printf '0' >/proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
   echo "IPv6 forwarding unavailable; IPv6 remains captured and IPv4 stays operational." >&2
 fi
+
+/app/lan-acl.sh apply
 
 resolve_dns_upstream() {
   NAME="$1"
@@ -211,6 +218,7 @@ cleanup() {
   set +e
   [ -n "${DNSMASQ_PID:-}" ] && kill "$DNSMASQ_PID" 2>/dev/null
   iptables -D FORWARD -i wg0 -o wg0 -j ACCEPT 2>/dev/null
+  iptables -D FORWARD -i wg0 -o "$EGRESS_IF" -j TB_LAN 2>/dev/null
   iptables -D FORWARD -i wg0 -o "$EGRESS_IF" -j ACCEPT 2>/dev/null
   iptables -D FORWARD -i "$EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
   iptables -t nat -D POSTROUTING -s "$IPV4_SUBNET" -o "$EGRESS_IF" -j MASQUERADE 2>/dev/null
@@ -219,6 +227,7 @@ cleanup() {
   if [ "$IPV6_FIREWALL" -eq 1 ]; then
     ip6tables -D FORWARD -i wg0 -o wg0 -j ACCEPT 2>/dev/null
     if [ -n "$IPV6_EGRESS_IF" ]; then
+      ip6tables -D FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j TB_LAN 2>/dev/null
       ip6tables -D FORWARD -i wg0 -o "$IPV6_EGRESS_IF" -j ACCEPT 2>/dev/null
       ip6tables -D FORWARD -i "$IPV6_EGRESS_IF" -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
       if [ "$IPV6_NAT" -eq 1 ]; then
@@ -227,6 +236,7 @@ cleanup() {
     fi
     ip6tables -P FORWARD ACCEPT 2>/dev/null
   fi
+  /app/lan-acl.sh teardown
   ip link del wg0 2>/dev/null
 }
 trap cleanup INT TERM EXIT

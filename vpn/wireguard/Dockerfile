@@ -19,9 +19,10 @@ COPY vpn/wireguard/healthcheck.sh /app/healthcheck.sh
 COPY vpn/wireguard/show-client.sh /app/show-client.sh
 COPY vpn/wireguard/peer-manager.sh /app/peer-manager.sh
 COPY vpn/wireguard/https-firewall.sh /app/https-firewall.sh
+COPY vpn/wireguard/lan-acl.sh /app/lan-acl.sh
 
-RUN chmod 0755 /app/entrypoint.sh /app/healthcheck.sh /app/show-client.sh /app/peer-manager.sh /app/https-firewall.sh \
-    && sh -n /app/entrypoint.sh /app/healthcheck.sh /app/show-client.sh /app/peer-manager.sh /app/https-firewall.sh
+RUN chmod 0755 /app/entrypoint.sh /app/healthcheck.sh /app/show-client.sh /app/peer-manager.sh /app/https-firewall.sh /app/lan-acl.sh \
+    && sh -n /app/entrypoint.sh /app/healthcheck.sh /app/show-client.sh /app/peer-manager.sh /app/https-firewall.sh /app/lan-acl.sh
 
 VOLUME ["/config"]
 EXPOSE 51820/udp

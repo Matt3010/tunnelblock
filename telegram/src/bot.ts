@@ -20,6 +20,18 @@ import {
   topSourceLabel,
   updateStatusText,
 } from "./presentation.js";
+import {
+  hexToIp,
+  hostAccess,
+  lanAccessView,
+  lanHostView,
+  lanManualPrompt,
+  lanSummary,
+  parseManualRule,
+  toggleHostAll,
+  togglePort,
+  type LanAcl,
+} from "./lan.js";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const adminBase = process.env.ADMIN_API_BASE ?? "http://doh:8053";
@@ -164,6 +176,67 @@ async function findDomainOnPage(key: string, page: number) {
 
 const pendingListAdd = new Map<number, number>();
 const pendingPeerAdd = new Map<number, number>();
+const pendingLanRule = new Map<number, { messageId: number; name: string }>();
+const lanScanWatchers = new Set<string>();
+
+async function editView(
+  chatId: number,
+  messageId: number,
+  view: { text: string; reply_markup: TelegramBot.InlineKeyboardMarkup },
+) {
+  try {
+    await bot.editMessageText(view.text, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: view.reply_markup });
+  } catch (error) {
+    // Re-rendering an unchanged view (e.g. a refresh while scanning) is not an error.
+    if (!String((error as Error)?.message ?? "").includes("message is not modified")) throw error;
+  }
+}
+
+async function getLanState(name: string) {
+  const [acl, lan] = await Promise.all([
+    updaterApi(`/vpn/peers/${name}/lan`) as Promise<LanAcl>,
+    updaterApi("/lan"),
+  ]);
+  return { acl, inventory: lan.inventory ?? null, scan: lan.scan ?? { running: false, error: null } };
+}
+
+async function setLanRules(name: string, acl: LanAcl): Promise<LanAcl> {
+  return updaterApi(`/vpn/peers/${name}/lan`, {
+    method: "PUT",
+    body: JSON.stringify(acl.mode === "full" ? { mode: "full" } : { mode: "custom", rules: acl.rules }),
+  });
+}
+
+// Keeps the LAN view current until a running scan finishes.
+function watchLanScan(chatId: number, messageId: number, name: string) {
+  const key = `${chatId}:${messageId}`;
+  if (lanScanWatchers.has(key)) return;
+  lanScanWatchers.add(key);
+  void (async () => {
+    try {
+      for (let attempt = 0; attempt < 150; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 4000));
+        const lan = await updaterApi("/lan");
+        if (!lan.scan?.running) break;
+      }
+      await editLanView(chatId, messageId, name, 0, false);
+    } catch {
+      // The user can always refresh manually.
+    } finally {
+      lanScanWatchers.delete(key);
+    }
+  })();
+}
+
+async function editLanView(chatId: number, messageId: number, name: string, page: number, autoScan = true) {
+  let state = await getLanState(name);
+  if (autoScan && !state.inventory && !state.scan.running) {
+    await updaterApi("/lan/scan", { method: "POST", body: "{}" }).catch(() => {});
+    state = await getLanState(name);
+  }
+  await editView(chatId, messageId, lanAccessView(name, state.acl, state.inventory, state.scan, page));
+  if (state.scan.running) watchLanScan(chatId, messageId, name);
+}
 
 async function vpnView() {
   const peers = await updaterApi("/vpn/peers");
@@ -300,6 +373,65 @@ bot.on("callback_query", async query => {
       return;
     }
 
+    const lanView = data.match(/^lan:v:([A-Za-z0-9_-]{1,32}):(\d{1,3})$/);
+    if (lanView) {
+      pendingLanRule.delete(chatId);
+      await editLanView(chatId, messageId, lanView[1], Number(lanView[2]));
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const lanScan = data.match(/^lan:s:([A-Za-z0-9_-]{1,32})$/);
+    if (lanScan) {
+      await updaterApi("/lan/scan", { method: "POST", body: "{}" });
+      await bot.answerCallbackQuery(query.id, { text: "Network scan started…" });
+      await editLanView(chatId, messageId, lanScan[1], 0, false);
+      return;
+    }
+
+    const lanMode = data.match(/^lan:m:([A-Za-z0-9_-]{1,32}):(full|none)$/);
+    if (lanMode) {
+      const [, name, mode] = lanMode;
+      await setLanRules(name, mode === "full" ? { mode: "full", rules: [] } : { mode: "custom", rules: [] });
+      await editLanView(chatId, messageId, name, 0);
+      await bot.answerCallbackQuery(query.id, { text: mode === "full" ? "Full LAN access granted" : "LAN access removed" });
+      return;
+    }
+
+    const lanHost = data.match(/^lan:([hap]):([A-Za-z0-9_-]{1,32}):([0-9a-f]{8})(?::([tu]):(\d{1,5}))?$/);
+    if (lanHost) {
+      const [, kind, name, hex, protocol, port] = lanHost;
+      const ip = hexToIp(hex);
+      if (!ip || (kind === "p") !== Boolean(port)) {
+        await bot.answerCallbackQuery(query.id, { text: "Invalid action." });
+        return;
+      }
+      let { acl, inventory } = await getLanState(name);
+      if (kind !== "h") {
+        const rules = acl.mode === "full" ? [] : acl.rules;
+        acl = await setLanRules(name, {
+          mode: "custom",
+          rules: kind === "a"
+            ? toggleHostAll(rules, ip)
+            : togglePort(rules, ip, protocol === "t" ? "tcp" : "udp", Number(port)),
+        });
+      }
+      await editView(chatId, messageId, lanHostView(name, acl, inventory, ip));
+      const access = hostAccess(acl, ip);
+      await bot.answerCallbackQuery(query.id, kind === "h" ? undefined : {
+        text: access.all || access.ports.size ? "Access updated" : "Device blocked",
+      });
+      return;
+    }
+
+    const lanManual = data.match(/^lan:n:([A-Za-z0-9_-]{1,32})$/);
+    if (lanManual) {
+      pendingLanRule.set(chatId, { messageId, name: lanManual[1] });
+      await editView(chatId, messageId, lanManualPrompt(lanManual[1]));
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+
     if (data === "vpn:home") { pendingPeerAdd.delete(chatId); await editVpnHome(chatId, messageId); await bot.answerCallbackQuery(query.id); return; }
     if (data === "vpn:add") { pendingPeerAdd.set(chatId, messageId); await bot.editMessageText("➕ <b>New VPN User</b>\n\nSend a name using letters, numbers, <code>_</code> or <code>-</code>.", { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "vpn:home" }]] } }); await bot.answerCallbackQuery(query.id); return; }
     const vpnDetail = data.match(/^vpn:d:([A-Za-z0-9_-]{1,32})$/);
@@ -322,6 +454,7 @@ bot.on("callback_query", async query => {
         `<b>Status</b>     ${peer.enabled ? "✅ Enabled" : "⏸ Disabled"}`,
         `<b>IPv4</b>       ${codeHtml(peer.ipv4)}`,
         `<b>Handshake</b>  ${escapeHtml(last)}`,
+        `<b>LAN</b>        ${lanSummary(peer.lan)}`,
         `<b>Traffic</b>    ↓ ${formatBytes(Number(peer.rx ?? 0))} · ↑ ${formatBytes(Number(peer.tx ?? 0))}`,
       ].join("\n"), {
         chat_id: chatId,
@@ -330,6 +463,7 @@ bot.on("callback_query", async query => {
         reply_markup: {
           inline_keyboard: [
             [{ text: peer.enabled ? "⏸ Disable" : "▶️ Enable", callback_data: `vpn:e:${peer.name}:${peer.enabled ? 0 : 1}` }],
+            [{ text: "🏠 LAN access", callback_data: `lan:v:${peer.name}:0` }],
             [{ text: "📷 Show QR", callback_data: `vpn:g:${peer.name}` }, { text: "📄 Config", callback_data: `vpn:c:${peer.name}` }],
             [{ text: "🔑 Rotate keys", callback_data: `vpn:r:${peer.name}` }, { text: "🗑 Delete", callback_data: `vpn:q:${peer.name}` }],
             [{ text: "⬅️ Users", callback_data: "vpn:home" }],
@@ -577,6 +711,24 @@ bot.on("message", async msg => {
   await ensureCommandsForChat(chatId).catch(() => {});
 
   try {
+    const pendingLan = pendingLanRule.get(chatId);
+    if (pendingLan && text.startsWith("/")) pendingLanRule.delete(chatId);
+    if (pendingLan && !text.startsWith("/")) {
+      const rule = parseManualRule(text);
+      if (!rule) {
+        await sendMessage(chatId, "❌ <b>Invalid LAN rule</b>\n\nSend a private address like <code>192.168.1.50</code>, <code>192.168.1.50:8123</code> or <code>192.168.1.50 udp 1900</code>.");
+        return;
+      }
+      const { acl } = await getLanState(pendingLan.name);
+      const rules = acl.mode === "full" ? [] : acl.rules;
+      const host = rule.split("/")[0];
+      const kept = rule.endsWith("/any") ? rules.filter(item => item.split("/")[0] !== host) : rules;
+      await setLanRules(pendingLan.name, { mode: "custom", rules: [...new Set([...kept, rule])] });
+      pendingLanRule.delete(chatId);
+      await editLanView(chatId, pendingLan.messageId, pendingLan.name, 0);
+      return;
+    }
+
     const pendingPeerMessageId = pendingPeerAdd.get(chatId);
     if (pendingPeerMessageId !== undefined && !text.startsWith("/")) {
       const peer = await updaterApi("/vpn/peers", { method: "POST", body: JSON.stringify({ name: text }) });

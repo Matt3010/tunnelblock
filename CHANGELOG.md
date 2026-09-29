@@ -5,6 +5,8 @@ Versioning from its first tagged stable release.
 
 ## Unreleased
 
+- Added per-user LAN access control from Telegram, prefilled by automatic network discovery.
+  New VPN users are Internet-only by default; existing users keep full LAN access.
 - Rebranded the public project as TunnelBlock while retaining runtime identifiers for compatibility.
 - Added guided installation, continuous integration and GitHub contribution templates.
 - Documented shared iOS and Android WireGuard support.
