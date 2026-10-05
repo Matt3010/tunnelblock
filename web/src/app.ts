@@ -3,7 +3,6 @@ import path from "node:path";
 import Fastify, { type FastifyReply } from "fastify";
 import { LoginLimiter, credentialsMatch, parseBasicAuth } from "./auth.js";
 import { applyLanChange, lanDevices, lanSummary, type LanAcl, type LanChange } from "./lan.js";
-import { isPrivateAddress } from "./net.js";
 
 export type AppOptions = {
   user: string;
@@ -14,6 +13,8 @@ export type AppOptions = {
   publicDir: string;
   fetchImpl?: typeof fetch;
   logger?: boolean;
+  /** Trust X-Forwarded-For from the nginx proxy in front of the panel. */
+  trustProxy?: boolean;
 };
 
 type Upstream = { status: number; body: any };
@@ -44,7 +45,7 @@ function loadPublicFiles(dir: string): Map<string, { body: Buffer; type: string 
 }
 
 export function buildApp(options: AppOptions) {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({ logger: options.logger ?? false, trustProxy: options.trustProxy ?? false });
   const fetchImpl = options.fetchImpl ?? fetch;
   const limiter = new LoginLimiter(5, 15 * 60_000);
   const expected = { user: options.user, password: options.password };
@@ -58,8 +59,7 @@ export function buildApp(options: AppOptions) {
       "cache-control": "no-store",
     });
 
-    const source = request.socket.remoteAddress ?? "";
-    if (!isPrivateAddress(source)) return reply.code(403).send({ error: "forbidden" });
+    const source = request.ip;
     if (limiter.blocked(source)) return reply.code(429).send({ error: "too many failed logins, retry later" });
 
     const header = request.headers.authorization;

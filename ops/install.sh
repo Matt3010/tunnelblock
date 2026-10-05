@@ -57,7 +57,7 @@ case "$CONFIRM" in
     docker compose build
     docker compose up -d
     docker compose ps
-    echo "Initial stack started. Open http://<raspberry-lan-ip>:8088 from the LAN and create VPN users there. Forward only UDP/51820 on the router."
+    echo "Initial stack started. Point a Cloudflare Tunnel public hostname at http://localhost:8092 to open the web panel. Forward only UDP/51820 on the router."
     ;;
   *)
     echo "Configuration validated; no containers were changed."

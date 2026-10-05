@@ -31,7 +31,8 @@ Raspberry Pi / Docker
   |      +--> shared SQLite statistics volume
   |
   +--> updater
-  +--> web panel (LAN :8088)
+  +--> proxy (nginx, 127.0.0.1:8092) <-- Cloudflare Tunnel
+  +--> web panel
 ```
 
 ## Network boundary

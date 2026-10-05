@@ -156,6 +156,7 @@ verify_stack() {
   wait_service doh-b healthy || return 1
   wait_service updater healthy || return 1
   wait_service web healthy || return 1
+  wait_service proxy healthy || return 1
   wait_service wireguard healthy || return 1
 
   for i in $(seq 1 30); do
@@ -234,6 +235,9 @@ rollback_previous() (
   fi
   if docker compose config --services | grep -qx web; then
     wait_service web healthy
+  fi
+  if docker compose config --services | grep -qx proxy; then
+    wait_service proxy healthy
   fi
   if docker compose config --services | grep -qx telegram-bot; then
     wait_service telegram-bot running

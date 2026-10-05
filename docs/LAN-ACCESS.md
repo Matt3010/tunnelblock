@@ -27,9 +27,6 @@ upgrading never cuts existing access. Restrict them from the web panel when need
 Selecting a port also allows ping (ICMP echo) to that device. Changes apply
 immediately, including to connections that are already open.
 
-To let a VPN user open the web panel, allow the Raspberry (marked *server*) on
-port 8088/tcp, or give that user **Full LAN**.
-
 ## Network discovery
 
 The `lan-discovery` service (Compose profile `tools`, stopped by default) runs

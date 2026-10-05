@@ -36,9 +36,10 @@ function publicDir() {
   return dir;
 }
 
-function makeApp(routes: Record<string, Reply | ((call: Call) => Reply)> = {}) {
+function makeApp(routes: Record<string, Reply | ((call: Call) => Reply)> = {}, trustProxy = false) {
   const upstream = fakeUpstream(routes);
   const app = buildApp({
+    trustProxy,
     user: "admin",
     password: PASSWORD,
     adminToken: "secret-token",
@@ -52,12 +53,18 @@ function makeApp(routes: Record<string, Reply | ((call: Call) => Reply)> = {}) {
 
 const AUTH = `Basic ${Buffer.from(`admin:${PASSWORD}`).toString("base64")}`;
 
-test("refuses every request coming from the Internet, even with valid credentials", async () => {
-  const { app } = makeApp();
-  for (const url of ["/", "/api/status"]) {
-    const res = await app.inject({ method: "GET", url, remoteAddress: "8.8.8.8", headers: { authorization: AUTH } });
-    assert.equal(res.statusCode, 403, url);
+test("behind the HTTPS proxy, lockouts apply to the real client, not the proxy", async () => {
+  const { app } = makeApp({}, true);
+  const proxy = "172.20.0.9";
+  const wrong = `Basic ${Buffer.from("admin:nope").toString("base64")}`;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await app.inject({ method: "GET", url: "/", remoteAddress: proxy, headers: { authorization: wrong, "x-forwarded-for": "203.0.113.7" } });
   }
+  const attacker = await app.inject({ method: "GET", url: "/", remoteAddress: proxy, headers: { authorization: AUTH, "x-forwarded-for": "203.0.113.7" } });
+  assert.equal(attacker.statusCode, 429);
+
+  const owner = await app.inject({ method: "GET", url: "/", remoteAddress: proxy, headers: { authorization: AUTH, "x-forwarded-for": "198.51.100.4" } });
+  assert.equal(owner.statusCode, 200);
 });
 
 test("asks the browser for Basic credentials on every path", async () => {

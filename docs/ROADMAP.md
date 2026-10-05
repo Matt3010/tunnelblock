@@ -6,7 +6,7 @@
 - [x] Domain rule engine
 - [x] Docker deployment
 - [x] Persistent SQLite statistics
-- [x] Telegram administration (replaced by the LAN-only web panel)
+- [x] Telegram administration (replaced by the web panel)
 - [x] Updater with rollback (manual, from the web panel)
 
 ## M1 - Public DoH (retired)

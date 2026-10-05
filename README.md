@@ -1,7 +1,7 @@
 # TunnelBlock
 
 Self-hosted mobile ad blocking through WireGuard, designed for Raspberry Pi and
-managed from a LAN-only web panel. iOS and Android clients use the same full-tunnel configuration;
+managed from a web panel published through a Cloudflare Tunnel. iOS and Android clients use the same full-tunnel configuration;
 no public DNS or administration endpoint is exposed.
 
 ## Features
@@ -65,7 +65,8 @@ Raspberry Pi / Docker
   |      +--> application strategy registry
   |
   +--> updater
-  +--> web panel (LAN :8088, Basic auth)
+  +--> proxy (nginx, 127.0.0.1:8092) <-- Cloudflare Tunnel (HTTPS)
+  +--> web panel (Basic auth)
 ```
 
 The WireGuard container is isolated from updater, the web panel and admin-only service endpoints. It reaches only the resolver replicas through an internal Docker network and the Internet through a separate egress network.
@@ -88,8 +89,8 @@ Never use `docker compose down -v` as part of normal deployment or recovery.
 ## WireGuard-only exposure
 
 The resolver HTTP/admin API and raw DNS replicas are Docker-internal. The host publishes
-WireGuard UDP/51820 and the web panel on TCP/8088, which answers only private
-source addresses and must not be forwarded on the router; there is no public DoH, profile-download or resolver health endpoint.
+only WireGuard UDP/51820. The web panel's nginx front listens on 127.0.0.1 and is
+reached through the host's Cloudflare Tunnel; there is no public DoH, profile-download or resolver health endpoint.
 The mobile device receives DNS `10.66.66.1` from its WireGuard configuration.
 
 ## WireGuard

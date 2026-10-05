@@ -5,7 +5,8 @@ Versioning from its first tagged stable release.
 
 ## Unreleased
 
-- Replaced the Telegram bot with a LAN-only web panel protected by HTTP Basic auth.
+- Replaced the Telegram bot with a web panel protected by HTTP Basic auth,
+  published through a Cloudflare Tunnel behind a loopback-only nginx front.
   A stolen Telegram account can no longer control the stack. Set `WEB_PASSWORD` in `.env`
   (rerun `ops/install.sh` to generate it); `TELEGRAM_*` variables are no longer used.
 - Removed automatic deployment on push to `master`; updates start only from the web panel.

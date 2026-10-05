@@ -16,6 +16,7 @@ const app = buildApp({
   updaterBase: process.env.UPDATER_API_BASE ?? "http://updater:8090",
   publicDir: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public"),
   logger: true,
+  trustProxy: process.env.TRUST_PROXY === "1",
 });
 
 await app.listen({ host: "0.0.0.0", port: Number(process.env.PORT ?? 8080) });

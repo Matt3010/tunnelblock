@@ -1,27 +1,35 @@
 # Web panel
 
-The `web` service is the control panel for TunnelBlock. Open it from a device on the
-home network:
+The `web` service is the control panel for TunnelBlock. It is reachable from anywhere
+through the Cloudflare Tunnel on the host:
 
 ```text
-http://<raspberry-lan-ip>:8088
+Browser --HTTPS--> Cloudflare --tunnel--> 127.0.0.1:8092 (proxy, nginx) --> web:8080
 ```
 
 The browser asks for the user (`admin` by default) and the password set in `.env`.
 
-## Who can reach it
+## Publishing
 
-- **LAN:** any device on the home network, after logging in.
-- **VPN:** only VPN users whose [LAN access](LAN-ACCESS.md) includes the Raspberry on
-  port 8088 (or **Full LAN**). Other VPN users cannot reach it at all.
-- **Internet:** never. The panel refuses every non-private source address, even with
-  valid credentials. Do not forward port 8088 on the router.
+In the Cloudflare Zero Trust dashboard, open the tunnel that runs on the Raspberry
+(**Networks → Tunnels**) and add a **public hostname**, for example
+`tunnelblock.example.com`, with service `http://localhost:8092`.
 
-Five wrong passwords from the same address lock that address out for 15 minutes.
-Writes from other sites are refused (`Origin` check), so a malicious page cannot drive
-the panel through credentials the browser remembers.
+Nothing is opened on the router or the LAN: the nginx front binds to `127.0.0.1` only,
+and the panel itself has no published port.
 
-Traffic on the LAN is plain HTTP. Over the VPN it is encrypted by WireGuard.
+## Protection
+
+- HTTP Basic auth on every request, over Cloudflare's HTTPS.
+- Five wrong passwords from the same address lock that address out for 15 minutes.
+  The address is the visitor's real one (`CF-Connecting-IP`), so an attacker cannot lock
+  you out.
+- nginx limits each address to 10 requests per second (burst 40) and 30 connections.
+- Writes from other sites are refused (`Origin` check), so a malicious page cannot drive
+  the panel through credentials the browser remembers.
+- The admin token stays on the server; the browser never sees it.
+
+Optionally add a Cloudflare Access policy on the hostname for a second login.
 
 ## Pages
 
@@ -43,17 +51,10 @@ network. It does not run shell commands.
 ```text
 WEB_USER        default: admin
 WEB_PASSWORD    required, at least 12 characters
-WEB_PORT        host port, default: 8088
+WEB_PORT        loopback port of the nginx front, default: 8092
 ADMIN_API_TOKEN
 ```
 
 `ops/install.sh` generates `WEB_PASSWORD` and prints it once. Rerunning it on an
 existing installation adds the credentials if they are missing. Change the password by
 editing `.env` and recreating the `web` container.
-
-## Security
-
-- Never commit `.env`.
-- The admin token stays on the server; the browser never sees it.
-- Sessions do not exist: every request carries Basic credentials, so changing
-  `WEB_PASSWORD` takes effect immediately after the container restarts.

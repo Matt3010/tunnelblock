@@ -20,8 +20,8 @@ The installer creates `.env` only when it does not already exist, generates a ra
 admin API token, validates Compose and asks before the initial build/start. It never
 deletes volumes or existing material under `data/wireguard/`.
 
-Then forward UDP/51820 to the Raspberry Pi, open the [web panel](WEB.md) at
-`http://<raspberry-lan-ip>:8088` with the credentials printed by the installer, create a
+Then forward UDP/51820 to the Raspberry Pi, publish the [web panel](WEB.md) through
+your Cloudflare Tunnel, log in with the credentials printed by the installer, create a
 VPN user in **VPN** and
 import its QR code in the official WireGuard app on iOS or Android.
 

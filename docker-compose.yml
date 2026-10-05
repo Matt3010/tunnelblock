@@ -184,9 +184,7 @@ services:
       retries: 5
       start_period: 5s
 
-  # Control panel. Reachable from the LAN (and from VPN users granted LAN access
-  # to this host) on WEB_PORT; it refuses non-private sources and requires
-  # HTTP Basic auth. Never forward this port on the router.
+  # Control panel (HTTP Basic auth). Not published: only the HTTPS proxy reaches it.
   web:
     build:
       context: .
@@ -199,19 +197,41 @@ services:
         condition: service_healthy
     environment:
       PORT: 8080
+      TRUST_PROXY: "1"
       WEB_USER: ${WEB_USER:-admin}
       WEB_PASSWORD: ${WEB_PASSWORD:?WEB_PASSWORD is required in .env (at least 12 characters)}
       ADMIN_API_BASE: http://doh-a:8053
       UPDATER_API_BASE: http://updater:8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-    ports:
-      - "${WEB_PORT:-8088}:8080/tcp"
     healthcheck:
       test:
         - CMD
         - node
         - -e
         - "fetch('http://127.0.0.1:8080/').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # The panel's front door. Loopback only: the Cloudflare Tunnel on the host
+  # publishes it over HTTPS, so no port is opened on the router or the LAN.
+  proxy:
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8092}:80"
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -qO-
+        - http://127.0.0.1/healthz
       interval: 10s
       timeout: 3s
       retries: 5
