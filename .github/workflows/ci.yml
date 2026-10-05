@@ -20,20 +20,16 @@ jobs:
     env:
       ADMIN_API_TOKEN: ci-admin-token
       WEB_PASSWORD: ci-web-password
-      GITHUB_TOKEN: ci-read-token
       WG_SERVER_ENDPOINT: 192.0.2.1
     steps:
       - uses: actions/checkout@v6
       - name: Validate Compose and shell
         run: |
           docker compose config --quiet
-          docker compose --profile https-lab config --quiet
           docker compose --profile tools config --quiet
           sh -n ops/*.sh scripts/*.sh vpn/wireguard/*.sh vpn/discovery/*.sh
       - name: Build production stack
         run: docker compose build
-      - name: Build HTTPS lab
-        run: docker compose --profile https-lab build https-proxy
       - name: Build LAN discovery tool
         run: docker compose --profile tools build lan-discovery
       - name: Test and typecheck
@@ -44,6 +40,5 @@ jobs:
           docker compose run --rm --no-deps --entrypoint npm updater run typecheck
           docker compose run --rm --no-deps --entrypoint npm web test
           docker compose run --rm --no-deps --entrypoint npm web run typecheck
-          docker run --rm --entrypoint python adblock-general-purpose-https-proxy:latest -B -m unittest discover -s /tests -v
       - name: Verify optional services are excluded by default
-        run: test -z "$(docker compose config --services | grep -E '^(https-proxy|lan-discovery)$' || true)"
+        run: test -z "$(docker compose config --services | grep -Ex 'lan-discovery' || true)"

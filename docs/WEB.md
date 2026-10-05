@@ -33,17 +33,15 @@ Optionally add a Cloudflare Access policy on the hostname for a second login.
 
 ## Pages
 
-- **Overview:** resolver statistics, service health, most blocked and most requested
-  domains, update state with the latest deployment log, **Update now** and
-  **Reload DNS rules**. A failed update and its rollback show up here.
+- **Overview:** resolver statistics, service health and version, most blocked and most
+  requested domains, **Reload DNS rules**.
 - **Domains:** observed domains with their decision; set each one to Default, Allow or
   Block.
 - **Blocklists:** coverage, errors, add/enable/disable/refresh/remove sources.
 - **VPN:** create users, show the QR code, download the `.conf`, enable/disable,
   rotate keys, delete, and edit per-user [LAN access](LAN-ACCESS.md).
-- **HTTPS:** the optional [HTTPS integrations](HTTPS-INTEGRATIONS.md) registry.
 
-The panel talks only to the authenticated resolver and updater APIs on the Docker
+The panel talks only to the authenticated resolver and control (`updater`) APIs on the Docker
 network. It does not run shell commands.
 
 ## Environment variables

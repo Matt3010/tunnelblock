@@ -9,7 +9,9 @@ Versioning from its first tagged stable release.
   published through a Cloudflare Tunnel behind a loopback-only nginx front.
   A stolen Telegram account can no longer control the stack. Set `WEB_PASSWORD` in `.env`
   (rerun `ops/install.sh` to generate it); `TELEGRAM_*` variables are no longer used.
-- Removed automatic deployment on push to `master`; updates start only from the web panel.
+- Removed the updater's deployment flow (automatic and manual) and the opt-in HTTPS
+  integration lab. Deploy over SSH with `git pull` and `docker compose up -d --build`;
+  `GITHUB_TOKEN` is no longer used.
 - Added per-user LAN access control from Telegram, prefilled by automatic network discovery.
   New VPN users are Internet-only by default; existing users keep full LAN access.
 - Rebranded the public project as TunnelBlock while retaining runtime identifiers for compatibility.

@@ -12,14 +12,10 @@ no public DNS or administration endpoint is exposed.
 | DNS allow/block rules | ✅ | ✅ |
 | QR and `.conf` onboarding | ✅ | ✅ |
 | Multiple VPN peers | ✅ | ✅ |
-| Web panel administration (LAN/VPN only) | ✅ | ✅ |
+| Web panel administration (via Cloudflare Tunnel) | ✅ | ✅ |
 | Per-user LAN access with network discovery | ✅ | ✅ |
-| One-click updates with rollback | ✅ | ✅ |
-| Rolling DNS resolver updates | ✅ | ✅ |
-| HTTPS inspection | Experimental | Experimental |
 
-The HTTPS strategy registry is intentionally empty. A CA is not required for normal
-WireGuard or DNS filtering.
+Filtering is DNS-based: there is no TLS interception and no CA to install.
 
 ## Quick start
 
@@ -61,10 +57,7 @@ Raspberry Pi / Docker
   |      +--> shared allow/block rules
   |      +--> shared persistent SQLite statistics
   |
-  +--> https-proxy (opt-in profile, stopped by default)
-  |      +--> application strategy registry
-  |
-  +--> updater
+  +--> updater (control API: VPN users, LAN access, service health)
   +--> proxy (nginx, 127.0.0.1:8092) <-- Cloudflare Tunnel (HTTPS)
   +--> web panel (Basic auth)
 ```
@@ -105,40 +98,18 @@ The VPN provides:
 - in-memory LRU response cache that respects and ages upstream TTL values;
 - persistent keys/configuration;
 - platform-independent client configuration and QR generation;
-- health checking and updater integration.
-
-Normal filtering remains DNS-based. An opt-in HTTPS integration lab can temporarily intercept TLS traffic for registered application strategies; it is stopped by default and managed from the web panel.
-
-Use the **HTTPS** page of the [web panel](docs/WEB.md) to manage registered app strategies and observation sessions. The registry is currently empty. Only the public CA certificate can be downloaded; its private key never leaves the Raspberry Pi.
+- health checking.
 
 Use **LAN access** on a user in the **VPN** page to choose which home-network devices and ports
 that user may reach; see [docs/LAN-ACCESS.md](docs/LAN-ACCESS.md).
 
-See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup and VPN verification, and [docs/HTTPS-INTEGRATIONS.md](docs/HTTPS-INTEGRATIONS.md) for the HTTPS strategy architecture and safety model.
+See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup and VPN verification.
 
 ## Deployment
 
-Updates are manual: **Update now** in the web panel deploys the latest `master`. A deployment runs the current `ops/deploy.sh`, which:
-
-1. validates the Compose configuration;
-2. builds the complete stack;
-3. syntax-checks WireGuard scripts;
-4. runs DNS tests;
-5. runs TypeScript checks for DNS, web panel and updater;
-6. updates the two DNS resolver replicas one at a time, keeping the other replica available;
-7. reconciles the remaining services without forcing unchanged containers to restart;
-8. verifies service health and updater revision;
-9. rolls back to the previous SHA if deployment fails.
-
-The rolling resolver path keeps DNS filtering available while `doh-a` and `doh-b` are
-updated. If the WireGuard service itself changes, or an older installation does not yet
-support live upstream reloads, the updater falls back to a normal recreation and a brief
-VPN interruption can still occur.
-
-Persistent data is not reset during this process.
-
-After the one-time installation, deploy updates only through **Update now** in the web panel.
-Do not invoke `ops/deploy.sh` directly and never use `docker compose down -v`.
+Deployments are manual, over SSH on the Raspberry: `git pull` then
+`docker compose up -d --build --remove-orphans`. A push to `master` deploys nothing by
+itself. See [docs/DEPLOY.md](docs/DEPLOY.md). Never use `docker compose down -v`.
 
 ## License
 

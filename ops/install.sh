@@ -22,13 +22,9 @@ if [ -f .env ]; then
     echo "Added web panel credentials to .env: user admin, password $WEB_PASS"
   fi
 else
-  printf 'GitHub token with read access to this repository: '
-  read -r GITHUB_READ_TOKEN
   printf 'Public IP or DDNS hostname [auto]: '
   read -r WG_ENDPOINT
   WG_ENDPOINT="${WG_ENDPOINT:-auto}"
-
-  [ -n "$GITHUB_READ_TOKEN" ] || { echo "GitHub token is required for updates." >&2; exit 8; }
 
   ADMIN_TOKEN="$(openssl rand -hex 32)"
   WEB_PASS="$(new_web_password)"
@@ -40,14 +36,13 @@ else
     printf 'ADMIN_API_TOKEN=%s\n' "$ADMIN_TOKEN"
     printf 'WEB_USER=admin\n'
     printf 'WEB_PASSWORD=%s\n' "$WEB_PASS"
-    printf 'GITHUB_TOKEN=%s\n' "$GITHUB_READ_TOKEN"
   } >.env
   echo "Created .env with mode 0600."
   echo "Web panel login: user admin, password $WEB_PASS (stored in .env)"
 fi
 
-mkdir -p data/rules data/wireguard data/https
-chmod 0700 data/wireguard data/https
+mkdir -p data/rules data/wireguard
+chmod 0700 data/wireguard
 docker compose config --quiet
 
 printf 'Build and start the initial TunnelBlock stack now? [y/N] '

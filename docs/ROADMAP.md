@@ -7,7 +7,7 @@
 - [x] Docker deployment
 - [x] Persistent SQLite statistics
 - [x] Telegram administration (replaced by the web panel)
-- [x] Updater with rollback (manual, from the web panel)
+- [x] Manual deployment over SSH (automatic updater removed)
 
 ## M1 - Public DoH (retired)
 
@@ -45,5 +45,5 @@
 - [x] NAT/Internet forwarding
 - [x] VPN DNS through the existing blocker
 - [x] iPhone QR/config export
-- [x] Healthcheck and updater integration
+- [x] Healthcheck integration
 - [x] Real iPhone handshake and full-tunnel validation

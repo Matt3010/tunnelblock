@@ -294,12 +294,3 @@ test("describes and changes a user's LAN access", async () => {
   });
   assert.equal(invalid.statusCode, 400);
 });
-
-test("reports deployment status from the updater", async () => {
-  const { app } = makeApp({
-    "GET http://updater/status": { body: { running: false, lastSuccess: false, lastOutput: "boom", services: { web: "running" } } },
-  });
-  const headers = { authorization: AUTH };
-  const res = await app.inject({ method: "GET", url: "/api/update/status", remoteAddress: LAN, headers });
-  assert.equal(res.json().lastOutput, "boom");
-});

@@ -4,7 +4,6 @@
 
 - Raspberry Pi or Linux host with a supported Docker Engine and Docker Compose v2;
 - Git and OpenSSL;
-- GitHub token with read access, used by the updater;
 - router access for one UDP/51820 port-forward;
 - public IPv4 or a reachable DDNS hostname (CGNAT requires another endpoint strategy).
 
@@ -27,12 +26,7 @@ import its QR code in the official WireGuard app on iOS or Android.
 
 ## Updates
 
-After bootstrap, use only:
-
-**Update now** on the web panel **Overview** page, which also shows progress and the
-latest deployment log.
-
-Do not run `ops/deploy.sh` directly. Never run `docker compose down -v` and never delete
+Deploy manually over SSH, see [DEPLOY.md](DEPLOY.md). Never run `docker compose down -v` and never delete
 `data/wireguard/` during an update or recovery.
 
 ## Verification

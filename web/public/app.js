@@ -140,18 +140,14 @@ async function overviewPage() {
     api("GET", "/api/top?decision=block").catch(() => ({ items: [] })),
     api("GET", "/api/top?decision=allow").catch(() => ({ items: [] })),
   ]);
-  const update = diag.updater.ok ? diag.updater.body : null;
-  if (update?.running) {
-    setTimeout(() => { if (["", "#/", "#/overview"].includes(location.hash)) route(); }, 5000);
-  }
-
-  const services = update?.services ?? {};
+  const system = diag.updater.ok ? diag.updater.body : null;
+  const services = system?.services ?? {};
   const serviceRows = [
     ["DNS resolver A", services.dohA],
     ["DNS resolver B", services.dohB],
     ["WireGuard", services.wireguard],
     ["Web panel", services.web],
-    ["HTTPS lab (optional)", services.httpsProxy ?? "stopped"],
+    ["Proxy (nginx)", services.proxy],
   ].map(([name, state]) => row({ title: name, right: h("span", { class: `chip ${stateClass(state)}` }, state ?? "unknown") }));
 
   const topList = (title, data) => card(
@@ -180,43 +176,20 @@ async function overviewPage() {
           ),
           Number(status.blocklistErrors) ? h("p", { class: "warn" }, `${count(status.blocklistErrors)} blocklist(s) report errors.`) : null,
         ),
-    updateCard(update, diag.updater.ok ? null : diag.updater.body?.error),
-    card(h("h2", {}, "Services"), serviceRows,
+    card(h("h2", {}, "Services"),
+      system ? serviceRows : h("p", { class: "bad" }, `Control API unreachable: ${diag.updater.body?.error ?? "unknown error"}`),
       h("p", { class: "sub muted" },
-        `Resolver health: ${diag.health.ok ? "OK" : "failing"} · storage: ${diag.ready.body?.statsStorage ?? (diag.ready.ok ? "OK" : "failing")}`)),
+        `Resolver health: ${diag.health.ok ? "OK" : "failing"} · storage: ${diag.ready.body?.statsStorage ?? (diag.ready.ok ? "OK" : "failing")}`,
+        system?.currentSha ? ` · version ${String(system.currentSha).slice(0, 8)}` : ""),
+      h("div", { class: "actions" },
+        action("♻️ Reload DNS rules", async () => {
+          await api("POST", "/api/reload", {});
+          toast("DNS rules reloaded");
+        }),
+      )),
     topList("🚫 Most blocked", blocked),
     topList("✅ Most requested", allowed),
   ];
-}
-
-function updateCard(update, error) {
-  if (!update) return card(h("h2", {}, "Updates"), h("p", { class: "bad" }, `Updater unreachable: ${error ?? "unknown error"}`));
-
-  const state = update.running ? "updating" : update.lastSuccess === true ? "success" : update.lastSuccess === false ? "failed" : "idle";
-  const output = String(update.lastOutput ?? "").slice(-6000);
-
-  return card(
-    h("h2", {}, "Updates"),
-    h("dl", {},
-      h("dt", {}, "State"), h("dd", {}, h("span", { class: `chip ${stateClass(state)}` }, state)),
-      h("dt", {}, "Version"), h("dd", {}, h("code", {}, String(update.currentSha ?? "-").slice(0, 8))),
-      h("dt", {}, "Last started"), h("dd", {}, date(update.lastStartedAt)),
-      h("dt", {}, "Last finished"), h("dd", {}, date(update.lastFinishedAt)),
-    ),
-    state === "failed" ? h("p", { class: "bad" }, "The last update failed and was rolled back. See the log below.") : null,
-    h("div", { class: "actions" },
-      action("🔄 Update now", async () => {
-        await api("POST", "/api/update", {});
-        toast("Update started");
-        route();
-      }, { class: "primary", disabled: update.running }),
-      action("♻️ Reload DNS rules", async () => {
-        await api("POST", "/api/reload", {});
-        toast("DNS rules reloaded");
-      }),
-    ),
-    output ? h("details", { open: update.running || state === "failed" }, h("summary", {}, "Latest log"), h("pre", {}, output)) : null,
-  );
 }
 
 // ---- Domains --------------------------------------------------------------
@@ -520,80 +493,6 @@ function lanBody(name, data, change) {
   ];
 }
 
-// ---- HTTPS integrations ---------------------------------------------------
-
-async function integrationsPage() {
-  const data = await api("GET", "/api/integrations");
-  const runtime = data.runtime ?? {};
-  const items = data.items ?? [];
-  const output = h("div");
-
-  return [
-    h("h1", {}, "HTTPS integrations"),
-    card(
-      h("dl", {},
-        h("dt", {}, "CA"), h("dd", {}, runtime.caReady ? "✅ Ready" : "❌ Not prepared"),
-        h("dt", {}, "Active"), h("dd", {}, runtime.active ? `${runtime.integration} · ${String(runtime.mode ?? "").toUpperCase()}` : "None"),
-        h("dt", {}, "Proxy"), h("dd", {}, runtime.proxyState ?? "unknown"),
-        h("dt", {}, "HTTPS"), h("dd", {}, runtime.interception ?? "unknown"),
-        h("dt", {}, "QUIC"), h("dd", {}, runtime.quic ?? "unknown"),
-      ),
-      h("p", { class: "sub muted" }, "The CA is only needed for explicit HTTPS inspection tests. DNS blocking does not require it."),
-    ),
-    items.length
-      ? items.map(item => integrationCard(item, runtime, output))
-      : card(h("p", { class: "muted" }, "No integrations registered.")),
-    output,
-  ];
-}
-
-function integrationCard(item, runtime, output) {
-  const activeHere = Boolean(runtime.active && runtime.integration === item.id);
-  const actions = (item.actions ?? []).filter(a => !(a.visibleWhen === "active" && !activeHere) && !(a.visibleWhen === "inactive" && activeHere));
-  const observation = item.observation ?? {};
-
-  return card(
-    h("h2", {}, `${activeHere ? "🟢" : "⚪"} ${item.name}`),
-    item.description ? h("p", {}, item.description) : null,
-    h("p", { class: "sub muted" }, `Strategy ${item.status ?? "experimental"} · log ${bytes(observation.bytes)} · updated ${date(observation.modifiedAt)}`),
-    h("div", { class: "actions" }, actions.map(a => action(a.label, async () => {
-      toast("Operation in progress…");
-      const result = await api("POST", `/api/integrations/${item.id}/actions/${a.id}`, {});
-      const shown = [];
-      if (result.certificate) {
-        const raw = Uint8Array.from(atob(result.certificate.base64), c => c.charCodeAt(0));
-        download(result.certificate.filename, new Blob([raw], { type: result.certificate.contentType }));
-        shown.push(card(h("h2", {}, "🛡 TunnelBlock HTTPS CA"),
-          h("p", {}, "SHA-256 ", h("code", {}, result.certificate.fingerprint256)),
-          h("p", { class: "warn" }, "Install and trust this certificate only on a dedicated test device.")));
-      }
-      if (result.summary) shown.push(summaryCard(item.name, result.summary));
-      output.replaceChildren(...shown);
-      if (!shown.length) route();
-    }))),
-  );
-}
-
-function summaryCard(name, s) {
-  const verdict = Number(s.httpRequests) > 0
-    ? "✅ HTTPS was readable for at least part of the traffic."
-    : s.likelyCertificatePinning
-      ? "⚠️ Result is compatible with certificate pinning or CA rejection."
-      : "ℹ️ Not enough data to evaluate TLS inspection.";
-  return card(
-    h("h2", {}, `📊 ${name}`),
-    h("div", { class: "grid" },
-      stat("ClientHello", count(s.tlsClientHello)),
-      stat("TLS established", count(s.tlsEstablished)),
-      stat("TLS failed", count(s.tlsFailed)),
-      stat("HTTP requests", count(s.httpRequests)),
-      stat("HTTP responses", count(s.httpResponses)),
-      stat("HTTPS hosts", count(s.uniqueHosts)),
-    ),
-    h("p", {}, verdict),
-  );
-}
-
 // ---- Router ---------------------------------------------------------------
 
 function go(hash) {
@@ -619,7 +518,6 @@ async function route() {
     else if (tab === "vpn" && parts[1] && parts[2] === "lan") content = await lanPage(parts[1]);
     else if (tab === "vpn" && parts[1]) content = await peerPage(parts[1]);
     else if (tab === "vpn") content = await vpnPage();
-    else if (tab === "integrations") content = await integrationsPage();
     else content = await overviewPage();
   } catch (error) {
     content = card(h("p", { class: "bad" }, `Unable to load: ${error.message}`), h("div", { class: "actions" }, action("Retry", route)));

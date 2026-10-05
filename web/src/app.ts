@@ -23,7 +23,6 @@ const DOMAINS_PAGE_SIZE = 20;
 const peerName = /^[A-Za-z0-9_-]{1,32}$/;
 const listId = /^[a-f0-9]{12}$/;
 const domainKey = /^[a-f0-9]{16}$/;
-const integrationPart = /^[a-z0-9_-]{1,24}$/;
 
 const contentTypes: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -277,21 +276,9 @@ export function buildApp(options: AppOptions) {
 
   app.post("/api/lan/scan", async (_request, reply) => relay(reply, await updater("/lan/scan", { method: "POST", body: {} })));
 
-  // ---- HTTPS integrations ------------------------------------------------
-
-  app.get("/api/integrations", async (_request, reply) => relay(reply, await updater("/integrations")));
-
-  app.post("/api/integrations/:id/actions/:action", async (request, reply) => {
-    const { id, action } = request.params as { id: string; action: string };
-    if (!integrationPart.test(id) || !integrationPart.test(action)) return badRequest(reply);
-    return relay(reply, await updater(`/integrations/${id}/actions/${action}`, { method: "POST", body: {} }));
-  });
-
   // ---- System ------------------------------------------------------------
 
   app.post("/api/reload", async (_request, reply) => relay(reply, await admin("/admin/reload", { method: "POST", body: {} })));
-  app.post("/api/update", async (_request, reply) => relay(reply, await updater("/update", { method: "POST", body: {} })));
-  app.get("/api/update/status", async (_request, reply) => relay(reply, await updater("/status")));
 
   return app;
 }

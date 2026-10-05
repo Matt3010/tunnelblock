@@ -5,8 +5,8 @@ delete `data/wireguard/` during recovery.
 
 ## Normal recovery
 
-Use **Update now** in the web panel for deployments. The updater performs preflight checks and
-rolls back without deleting persistent data. Do not invoke `sh ops/deploy.sh` directly.
+Deploy and roll back manually as described in [DEPLOY.md](DEPLOY.md); neither deletes
+persistent data.
 
 Check the stack with:
 

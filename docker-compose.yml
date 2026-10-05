@@ -90,50 +90,6 @@ services:
       retries: 5
       start_period: 10s
 
-  https-proxy:
-    profiles:
-      - https-lab
-    build:
-      context: .
-      dockerfile: https/Dockerfile
-    restart: "no"
-    depends_on:
-      wireguard:
-        condition: service_healthy
-    network_mode: "service:wireguard"
-    environment:
-      HTTPS_ACTIVE_STRATEGY: ${HTTPS_ACTIVE_STRATEGY:-}
-      HTTPS_MODE: ${HTTPS_MODE:-disabled}
-      HTTPS_INTEGRATION_REGISTRY: /app/integrations.json
-      HTTPS_OBSERVATION_DIR: /home/mitmproxy/.mitmproxy/observations
-      HTTPS_OBSERVATION_MAX_BYTES: 26214400
-    volumes:
-      - ${HOST_REPO_DIR:-.}/data/https:/home/mitmproxy/.mitmproxy
-    command:
-      - mitmdump
-      - --mode
-      - transparent
-      - --listen-host
-      - 0.0.0.0
-      - --listen-port
-      - "8080"
-      - --set
-      - confdir=/home/mitmproxy/.mitmproxy
-      - --set
-      - flow_detail=0
-      - -s
-      - /app/app/main.py
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import socket; s=socket.create_connection(('127.0.0.1',8080),2); s.close()"
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-
   # On-demand LAN inventory for per-user VPN access rules. It needs the host
   # network namespace to see the Raspberry's LAN; the updater runs it with
   # `docker compose --profile tools run --rm lan-discovery`.
@@ -153,22 +109,13 @@ services:
     build:
       context: .
       dockerfile: updater/Dockerfile
-      args:
-        UPDATER_BUILD_SHA: ${DEPLOY_SHA:-dev}
     restart: unless-stopped
     environment:
       PORT: 8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      GIT_BRANCH: ${UPDATE_BRANCH:-master}
       REPO_DIR: /workspace
-      COMPOSE_PROJECT_NAME: adblock-general-purpose
       LIST_REFRESH_INTERVAL_HOURS: 24
       LAN_SCAN_INTERVAL_HOURS: 12
-      UPDATER_STATE_FILE: /updater-data/state.json
-      UPDATER_LOG_FILE: /updater-data/deploy.log
-      UPDATER_DATA_VOLUME: adblock-general-purpose-updater-data
-      UPDATER_RUNTIME_GENERATION: "7"
     volumes:
       - ${HOST_REPO_DIR:-.}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -184,7 +131,7 @@ services:
       retries: 5
       start_period: 5s
 
-  # Control panel (HTTP Basic auth). Not published: only the HTTPS proxy reaches it.
+  # Control panel (HTTP Basic auth). Not published: only the nginx proxy reaches it.
   web:
     build:
       context: .
