@@ -1,7 +1,7 @@
 # TunnelBlock
 
 Self-hosted mobile ad blocking through WireGuard, designed for Raspberry Pi and
-managed from Telegram. iOS and Android clients use the same full-tunnel configuration;
+managed from a LAN-only web panel. iOS and Android clients use the same full-tunnel configuration;
 no public DNS or administration endpoint is exposed.
 
 ## Features
@@ -12,7 +12,7 @@ no public DNS or administration endpoint is exposed.
 | DNS allow/block rules | ✅ | ✅ |
 | QR and `.conf` onboarding | ✅ | ✅ |
 | Multiple VPN peers | ✅ | ✅ |
-| Telegram administration | ✅ | ✅ |
+| Web panel administration (LAN/VPN only) | ✅ | ✅ |
 | Per-user LAN access with network discovery | ✅ | ✅ |
 | Automatic updates with rollback | ✅ | ✅ |
 | Rolling DNS resolver updates | ✅ | ✅ |
@@ -23,8 +23,8 @@ WireGuard or DNS filtering.
 
 ## Quick start
 
-Requirements: a Raspberry Pi or Linux host with Git, Docker Engine, Docker Compose,
-a Telegram bot token and a router capable of forwarding UDP/51820.
+Requirements: a Raspberry Pi or Linux host with Git, Docker Engine, Docker Compose
+and a router capable of forwarding UDP/51820.
 
 ```bash
 git clone https://github.com/Matt3010/tunnelblock.git
@@ -65,10 +65,10 @@ Raspberry Pi / Docker
   |      +--> application strategy registry
   |
   +--> updater
-  +--> telegram-bot
+  +--> web panel (LAN :8088, Basic auth)
 ```
 
-The WireGuard container is isolated from updater, Telegram and admin-only service endpoints. It reaches only the resolver replicas through an internal Docker network and the Internet through a separate egress network.
+The WireGuard container is isolated from updater, the web panel and admin-only service endpoints. It reaches only the resolver replicas through an internal Docker network and the Internet through a separate egress network.
 
 ## Persistent state
 
@@ -79,7 +79,7 @@ data/rules/
 data/wireguard/
 ```
 
-SQLite, updater state and Telegram state use named Docker volumes.
+SQLite and updater state use named Docker volumes.
 
 WireGuard server/client private keys, the preshared key, generated client configuration and QR image are created at runtime under `data/wireguard/`. Existing files are reused, so `docker compose up -d --force-recreate` and automatic updates do not rotate keys.
 
@@ -88,7 +88,8 @@ Never use `docker compose down -v` as part of normal deployment or recovery.
 ## WireGuard-only exposure
 
 The resolver HTTP/admin API and raw DNS replicas are Docker-internal. The host publishes
-only WireGuard UDP/51820; there is no public DoH, profile-download or resolver health endpoint.
+WireGuard UDP/51820 and the web panel on TCP/8088, which answers only private
+source addresses and must not be forwarded on the router; there is no public DoH, profile-download or resolver health endpoint.
 The mobile device receives DNS `10.66.66.1` from its WireGuard configuration.
 
 ## WireGuard
@@ -105,11 +106,11 @@ The VPN provides:
 - platform-independent client configuration and QR generation;
 - health checking and updater integration.
 
-Normal filtering remains DNS-based. An opt-in HTTPS integration lab can temporarily intercept TLS traffic for registered application strategies; it is stopped by default and managed from Telegram.
+Normal filtering remains DNS-based. An opt-in HTTPS integration lab can temporarily intercept TLS traffic for registered application strategies; it is stopped by default and managed from the web panel.
 
-Use `/integrations` in the Telegram bot to manage registered app strategies and observation sessions. The registry is currently empty. Only the public CA certificate can be downloaded; its private key never leaves the Raspberry Pi.
+Use the **HTTPS** page of the [web panel](docs/WEB.md) to manage registered app strategies and observation sessions. The registry is currently empty. Only the public CA certificate can be downloaded; its private key never leaves the Raspberry Pi.
 
-Use **LAN access** on a user in `/vpn` to choose which home-network devices and ports
+Use **LAN access** on a user in the **VPN** page to choose which home-network devices and ports
 that user may reach; see [docs/LAN-ACCESS.md](docs/LAN-ACCESS.md).
 
 See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup and VPN verification, and [docs/HTTPS-INTEGRATIONS.md](docs/HTTPS-INTEGRATIONS.md) for the HTTPS strategy architecture and safety model.
@@ -122,7 +123,7 @@ The updater watches `master`. A deployment runs the current `ops/deploy.sh`, whi
 2. builds the complete stack;
 3. syntax-checks WireGuard scripts;
 4. runs DNS tests;
-5. runs TypeScript checks for DNS, Telegram and updater;
+5. runs TypeScript checks for DNS, web panel and updater;
 6. updates the two DNS resolver replicas one at a time, keeping the other replica available;
 7. reconciles the remaining services without forcing unchanged containers to restart;
 8. verifies service health and updater revision;
@@ -135,7 +136,7 @@ VPN interruption can still occur.
 
 Persistent data is not reset during this process.
 
-After the one-time installation, deploy updates only through `/update` in Telegram.
+After the one-time installation, deploy updates only through **Update now** in the web panel.
 Do not invoke `ops/deploy.sh` directly and never use `docker compose down -v`.
 
 ## License

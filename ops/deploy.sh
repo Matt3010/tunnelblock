@@ -18,25 +18,6 @@ log() {
   printf '%s\n' "$*" >>"$LOG_FILE"
 }
 
-notify() {
-  MESSAGE="$1"
-  [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || return 0
-  [ -n "${TELEGRAM_ALLOWED_USER_IDS:-}" ] || return 0
-
-  OLD_IFS="$IFS"
-  IFS=','
-  for CHAT_ID in $TELEGRAM_ALLOWED_USER_IDS; do
-    IFS="$OLD_IFS"
-    CHAT_ID="$(printf '%s' "$CHAT_ID" | tr -d ' ')"
-    [ -n "$CHAT_ID" ] || continue
-    curl -fsS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-      --data-urlencode "chat_id=$CHAT_ID" \
-      --data-urlencode "text=$MESSAGE" >/dev/null 2>&1 || true
-    IFS=','
-  done
-  IFS="$OLD_IFS"
-}
-
 service_state() {
   SERVICE="$1"
   CID="$(docker compose ps -q --all "$SERVICE" 2>/dev/null || true)"
@@ -174,7 +155,7 @@ verify_stack() {
   wait_service doh-a healthy || return 1
   wait_service doh-b healthy || return 1
   wait_service updater healthy || return 1
-  wait_service telegram-bot running || return 1
+  wait_service web healthy || return 1
   wait_service wireguard healthy || return 1
 
   for i in $(seq 1 30); do
@@ -212,15 +193,15 @@ deploy_target() (
   docker compose run --rm --no-deps --entrypoint npm doh-a test >>"$LOG_FILE" 2>&1
   docker compose run --rm --no-deps --entrypoint npm updater test >>"$LOG_FILE" 2>&1
 
-  log "== Pre-flight: Telegram bot tests =="
-  docker compose run --rm --no-deps --entrypoint npm telegram-bot test >>"$LOG_FILE" 2>&1
+  log "== Pre-flight: web panel tests =="
+  docker compose run --rm --no-deps --entrypoint npm web test >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: HTTPS framework and registry tests =="
   docker compose --profile https-lab run --rm --no-deps --entrypoint python https-proxy -B -m unittest discover -s /tests -v >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight: TypeScript checks =="
   docker compose run --rm --no-deps --entrypoint npm doh-a run typecheck >>"$LOG_FILE" 2>&1
-  docker compose run --rm --no-deps --entrypoint npm telegram-bot run typecheck >>"$LOG_FILE" 2>&1
+  docker compose run --rm --no-deps --entrypoint npm web run typecheck >>"$LOG_FILE" 2>&1
   docker compose run --rm --no-deps --entrypoint npm updater run typecheck >>"$LOG_FILE" 2>&1
 
   log "== Pre-flight passed =="
@@ -251,7 +232,12 @@ rollback_previous() (
   if docker compose config --services | grep -qx doh-proxy; then
     wait_service doh-proxy running
   fi
-  wait_service telegram-bot running
+  if docker compose config --services | grep -qx web; then
+    wait_service web healthy
+  fi
+  if docker compose config --services | grep -qx telegram-bot; then
+    wait_service telegram-bot running
+  fi
   if docker compose config --services | grep -qx wireguard; then
     wait_service wireguard healthy
   fi
@@ -269,7 +255,6 @@ set -e
 if [ "$DEPLOY_CODE" -eq 0 ]; then
   log "Deployment completed successfully."
   node /update-state.mjs success
-  notify "✅ TunnelBlock successfully updated to $TARGET_SHA."
   exit 0
 fi
 
@@ -282,10 +267,8 @@ set -e
 
 if [ "$ROLLBACK_CODE" -eq 0 ]; then
   log "Rollback recovered the previous stack."
-  notify "❌ TunnelBlock update failed. Rollback completed. Use /update_status for details."
 else
   log "CRITICAL: rollback failed with exit code $ROLLBACK_CODE."
-  notify "❌ TunnelBlock update failed and rollback is incomplete. Use /update_status for details."
 fi
 
 node /update-state.mjs failed

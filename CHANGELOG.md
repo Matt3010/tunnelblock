@@ -5,6 +5,9 @@ Versioning from its first tagged stable release.
 
 ## Unreleased
 
+- Replaced the Telegram bot with a LAN-only web panel protected by HTTP Basic auth.
+  A stolen Telegram account can no longer control the stack. Set `WEB_PASSWORD` in `.env`
+  (rerun `ops/install.sh` to generate it); `TELEGRAM_*` variables are no longer used.
 - Added per-user LAN access control from Telegram, prefilled by automatic network discovery.
   New VPN users are Internet-only by default; existing users keep full LAN access.
 - Rebranded the public project as TunnelBlock while retaining runtime identifiers for compatibility.

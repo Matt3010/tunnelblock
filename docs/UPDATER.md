@@ -8,12 +8,7 @@ Default polling interval:
 300 seconds (5 minutes)
 ```
 
-Telegram fallbacks remain available:
-
-```text
-/update
-/update_status
-```
+The web panel **Overview** page starts a manual update and shows its progress and log.
 
 ## Current deployment flow
 
@@ -27,7 +22,7 @@ For a detected target SHA:
 6. every image is built while the current runtime is still active;
 7. WireGuard shell scripts are syntax-checked;
 8. DNS tests run;
-9. TypeScript checks run for DNS, Telegram and updater;
+9. tests and TypeScript checks run for DNS, web panel and updater;
 10. only after pre-flight succeeds, the complete stack is recreated;
 11. service health and updater build SHA are verified;
 12. any failure triggers a reset/rebuild/recreate of the previous SHA.
@@ -55,8 +50,7 @@ WireGuard uses create-if-missing key generation. Therefore an automatic deployme
 Named volumes preserve:
 
 - DNS SQLite statistics;
-- updater state/logs;
-- Telegram state.
+- updater state/logs.
 
 Normal deployment never invokes `docker compose down -v`.
 

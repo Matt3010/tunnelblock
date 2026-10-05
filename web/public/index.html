@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>TunnelBlock</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">🛡 TunnelBlock</div>
+    <nav id="nav">
+      <a href="#/overview" data-tab="overview">Overview</a>
+      <a href="#/domains" data-tab="domains">Domains</a>
+      <a href="#/lists" data-tab="lists">Blocklists</a>
+      <a href="#/vpn" data-tab="vpn">VPN</a>
+      <a href="#/integrations" data-tab="integrations">HTTPS</a>
+    </nav>
+  </header>
+  <main id="view" aria-live="polite"></main>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>

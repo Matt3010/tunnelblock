@@ -17,7 +17,7 @@ body:
     id: component
     attributes:
       label: Component
-      options: [WireGuard, DNS blocker, Telegram bot, Updater, HTTPS lab, Documentation]
+      options: [WireGuard, DNS blocker, Web panel, Updater, HTTPS lab, Documentation]
     validations:
       required: true
   - type: textarea

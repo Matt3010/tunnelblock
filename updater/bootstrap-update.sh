@@ -15,31 +15,11 @@ restore_repo_ownership() {
   chown -R "$REPO_UID:$REPO_GID" /workspace 2>/dev/null || true
 }
 
-notify() {
-  MESSAGE="$1"
-  [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || return 0
-  [ -n "${TELEGRAM_ALLOWED_USER_IDS:-}" ] || return 0
-
-  OLD_IFS="$IFS"
-  IFS=','
-  for CHAT_ID in $TELEGRAM_ALLOWED_USER_IDS; do
-    IFS="$OLD_IFS"
-    CHAT_ID="$(printf '%s' "$CHAT_ID" | tr -d ' ')"
-    [ -n "$CHAT_ID" ] || continue
-    curl -fsS -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-      --data-urlencode "chat_id=$CHAT_ID" \
-      --data-urlencode "text=$MESSAGE" >/dev/null 2>&1 || true
-    IFS=','
-  done
-  IFS="$OLD_IFS"
-}
-
 bootstrap_failure() {
   CODE="$1"
   export TARGET_SHA="${TARGET_SHA:-}"
   printf '%s\n' "Bootstrap failed with exit code $CODE" >>"$LOG_FILE" 2>/dev/null || true
   node /update-state.mjs failed 2>/dev/null || true
-  notify "❌ TunnelBlock update failed during bootstrap. Exit code: $CODE"
 }
 
 on_exit() {

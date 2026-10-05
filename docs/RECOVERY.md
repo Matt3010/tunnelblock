@@ -5,7 +5,7 @@ delete `data/wireguard/` during recovery.
 
 ## Normal recovery
 
-Use `/update` in the Telegram bot for deployments. The updater performs preflight checks and
+Use **Update now** in the web panel for deployments. The updater performs preflight checks and
 rolls back without deleting persistent data. Do not invoke `sh ops/deploy.sh` directly.
 
 Check the stack with:

@@ -169,9 +169,7 @@ services:
       UPDATER_STATE_FILE: /updater-data/state.json
       UPDATER_LOG_FILE: /updater-data/deploy.log
       UPDATER_DATA_VOLUME: adblock-general-purpose-updater-data
-      UPDATER_RUNTIME_GENERATION: "6"
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
+      UPDATER_RUNTIME_GENERATION: "7"
     volumes:
       - ${HOST_REPO_DIR:-.}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -187,10 +185,13 @@ services:
       retries: 5
       start_period: 5s
 
-  telegram-bot:
+  # Control panel. Reachable from the LAN (and from VPN users granted LAN access
+  # to this host) on WEB_PORT; it refuses non-private sources and requires
+  # HTTP Basic auth. Never forward this port on the router.
+  web:
     build:
       context: .
-      dockerfile: telegram/Dockerfile
+      dockerfile: web/Dockerfile
     restart: unless-stopped
     depends_on:
       doh-a:
@@ -198,12 +199,24 @@ services:
       updater:
         condition: service_healthy
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS}
+      PORT: 8080
+      WEB_USER: ${WEB_USER:-admin}
+      WEB_PASSWORD: ${WEB_PASSWORD:?WEB_PASSWORD is required in .env (at least 12 characters)}
       ADMIN_API_BASE: http://doh-a:8053
       UPDATER_API_BASE: http://updater:8090
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-      BOT_RUNTIME_GENERATION: "8"
+    ports:
+      - "${WEB_PORT:-8088}:8080/tcp"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 networks:
   vpn-egress:

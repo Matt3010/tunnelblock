@@ -24,11 +24,6 @@ const lanScanIntervalHours = Number(process.env.LAN_SCAN_INTERVAL_HOURS ?? 12);
 const runtimeGeneration = process.env.UPDATER_RUNTIME_GENERATION ?? "unknown";
 const runtimeBuildSha = process.env.UPDATER_BUILD_SHA ?? "unknown";
 const runtimeStartedAt = new Date().toISOString();
-const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-const telegramUserIds = (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
-  .split(",")
-  .map(value => value.trim())
-  .filter(Boolean);
 
 const updaterStateFile = process.env.UPDATER_STATE_FILE ?? "/updater-data/state.json";
 const updaterLogFile = process.env.UPDATER_LOG_FILE ?? "/updater-data/deploy.log";
@@ -138,25 +133,6 @@ function authorized(request: any, reply: any): boolean {
   }
 
   return true;
-}
-
-async function notifyTelegram(message: string): Promise<void> {
-  if (!telegramToken || telegramUserIds.length === 0) return;
-
-  for (const chatId of telegramUserIds) {
-    try {
-      await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: message,
-        }),
-      });
-    } catch (error) {
-      app.log.error({ error, chatId }, "telegram-notification-failed");
-    }
-  }
 }
 
 function githubAuthHeader(): string {
@@ -522,9 +498,6 @@ async function reconcileInterruptedDeployment(): Promise<void> {
   };
 
   persistUpdateState(failedState);
-  await notifyTelegram(
-    "❌ TunnelBlock update interrupted: the deployment helper is no longer running.",
-  );
 }
 
 async function refreshExternalBlocklists(): Promise<void> {
@@ -553,9 +526,7 @@ async function refreshExternalBlocklists(): Promise<void> {
   }
 }
 
-async function launchDeployment(
-  trigger: "manual" | "automatic",
-): Promise<{ started: boolean; helperId?: string }> {
+async function launchDeployment(): Promise<{ started: boolean; helperId?: string }> {
   if (launching) return { started: false };
 
   const currentState = loadUpdateState();
@@ -604,10 +575,6 @@ async function launchDeployment(
         `UPDATER_LOG_FILE=${updaterLogFile}`,
         "-e",
         `DEPLOY_STARTED_AT=${startedAt}`,
-        "-e",
-        `TELEGRAM_BOT_TOKEN=${telegramToken ?? ""}`,
-        "-e",
-        `TELEGRAM_ALLOWED_USER_IDS=${telegramUserIds.join(",")}`,
         "-v",
         "/var/run/docker.sock:/var/run/docker.sock",
         "-v",
@@ -637,12 +604,6 @@ async function launchDeployment(
       failedRemoteSha: null,
     });
 
-    await notifyTelegram(
-      trigger === "automatic"
-        ? "🔄 New push to master detected. TunnelBlock update started."
-        : "🔄 TunnelBlock update started.",
-    );
-
     return { started: true, helperId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -655,10 +616,6 @@ async function launchDeployment(
       lastSuccess: false,
       lastOutput: tail(state.lastOutput + `\nUnable to start deployment helper: ${message}\n`),
     });
-
-    await notifyTelegram(
-      `❌ Unable to start the TunnelBlock update: ${message}`,
-    );
 
     throw error;
   } finally {
@@ -686,7 +643,7 @@ async function checkForUpdates(): Promise<void> {
 
     if (remote !== local) {
       app.log.info({ local, remote }, "new-master-revision-detected");
-      await launchDeployment("automatic");
+      await launchDeployment();
       return;
     }
 
@@ -695,7 +652,7 @@ async function checkForUpdates(): Promise<void> {
         { remote, runtimeBuildSha },
         "stale-runtime-revision-detected",
       );
-      await launchDeployment("automatic");
+      await launchDeployment();
       return;
     }
 
@@ -728,10 +685,10 @@ app.get("/status", async (request, reply) => {
     currentSha = await localSha();
   } catch {}
 
-  const [dohA, dohB, telegram, wireguard, httpsProxy] = await Promise.all([
+  const [dohA, dohB, web, wireguard, httpsProxy] = await Promise.all([
     serviceRuntimeState("doh-a"),
     serviceRuntimeState("doh-b"),
-    serviceRuntimeState("telegram-bot"),
+    serviceRuntimeState("web"),
     serviceRuntimeState("wireguard"),
     httpsProxyRuntimeState(),
   ]);
@@ -753,7 +710,7 @@ app.get("/status", async (request, reply) => {
     services: {
       dohA,
       dohB,
-      telegram,
+      web,
       wireguard,
       httpsProxy,
     },
@@ -769,7 +726,7 @@ app.post("/update", async (request, reply) => {
   }
 
   try {
-    const result = await launchDeployment("manual");
+    const result = await launchDeployment();
     if (!result.started) {
       return reply.code(409).send({ error: "update already running" });
     }

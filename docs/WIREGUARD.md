@@ -78,7 +78,7 @@ Do not expose:
 - port 53;
 - updater port 8090;
 - resolver admin routes;
-- Telegram/control APIs.
+- control APIs (the web panel is reachable only through LAN access to the Raspberry, see [LAN-ACCESS.md](LAN-ACCESS.md)).
 
 ## Import a mobile client
 
@@ -102,7 +102,7 @@ To print the raw client file instead:
 sh scripts/wireguard-client.sh conf
 ```
 
-The QR and raw configuration contain the client's private key and preshared key. Treat both as secrets and do not paste them into GitHub, Telegram logs or support messages.
+The QR and raw configuration contain the client's private key and preshared key. Treat both as secrets and do not paste them into GitHub, chats or support messages.
 
 ## Remove the old managed DoH profile
 
@@ -152,7 +152,7 @@ docker compose logs -f doh-a doh-b
 
 Then open a hostname not recently cached on the device.
 
-You should see DNS queries in the existing resolver logs. They also feed the same persistent SQLite statistics and existing Telegram diagnostics.
+You should see DNS queries in the existing resolver logs. They also feed the same persistent SQLite statistics and web panel Overview.
 
 The VPN DNS path is:
 

@@ -19,8 +19,7 @@ jobs:
     timeout-minutes: 30
     env:
       ADMIN_API_TOKEN: ci-admin-token
-      TELEGRAM_BOT_TOKEN: ci-telegram-token
-      TELEGRAM_ALLOWED_USER_IDS: "1"
+      WEB_PASSWORD: ci-web-password
       GITHUB_TOKEN: ci-read-token
       WG_SERVER_ENDPOINT: 192.0.2.1
     steps:
@@ -43,8 +42,8 @@ jobs:
           docker compose run --rm --no-deps --entrypoint npm doh-a run typecheck
           docker compose run --rm --no-deps --entrypoint npm updater test
           docker compose run --rm --no-deps --entrypoint npm updater run typecheck
-          docker compose run --rm --no-deps --entrypoint npm telegram-bot test
-          docker compose run --rm --no-deps --entrypoint npm telegram-bot run typecheck
+          docker compose run --rm --no-deps --entrypoint npm web test
+          docker compose run --rm --no-deps --entrypoint npm web run typecheck
           docker run --rm --entrypoint python adblock-general-purpose-https-proxy:latest -B -m unittest discover -s /tests -v
       - name: Verify optional services are excluded by default
         run: test -z "$(docker compose config --services | grep -E '^(https-proxy|lan-discovery)$' || true)"

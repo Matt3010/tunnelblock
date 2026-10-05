@@ -2,7 +2,7 @@
 
 Every VPN user always has Internet access. Access to the home network (private
 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`)
-is decided per user from Telegram:
+is decided per user from the web panel:
 
 | Mode | Effect |
 | --- | --- |
@@ -11,21 +11,24 @@ is decided per user from Telegram:
 | 🔓 Full LAN | Every LAN device and port is reachable, including private IPv6. |
 
 Users created before this feature have no policy file and keep **Full LAN**, so
-upgrading never cuts existing access. Restrict them from Telegram when needed.
+upgrading never cuts existing access. Restrict them from the web panel when needed.
 
-## Telegram
+## Web panel
 
-`/vpn` → select a user → **🏠 LAN access**.
+**VPN** → select a user → **LAN access**.
 
 - Devices and open ports come from the automatic network discovery, so the lists
-  are prefilled: tap a device, then tick the ports this user may reach, or
+  are prefilled: choose the ports this user may reach, or
   **All ports** for the whole device.
-- **➕ Manual rule** adds devices or ports the scan did not see
+- **Manual rule** adds devices or ports the scan did not see
   (`192.168.1.50`, `192.168.1.50:8123`, `192.168.1.50 udp 1900`).
-- **🔍 Rescan network** refreshes the inventory on demand.
+- **Rescan network** refreshes the inventory on demand.
 
 Selecting a port also allows ping (ICMP echo) to that device. Changes apply
 immediately, including to connections that are already open.
+
+To let a VPN user open the web panel, allow the Raspberry (marked *server*) on
+port 8088/tcp, or give that user **Full LAN**.
 
 ## Network discovery
 
@@ -39,7 +42,7 @@ The `lan-discovery` service (Compose profile `tools`, stopped by default) runs
 - reverse-DNS hostnames and MAC vendors when available.
 
 The updater runs it at startup when no inventory exists, every
-`LAN_SCAN_INTERVAL_HOURS` (default 12, `0` disables) and on request from Telegram.
+`LAN_SCAN_INTERVAL_HOURS` (default 12, `0` disables) and on request from the web panel.
 The inventory is stored in the updater volume (`lan-inventory.json`). UDP services
 are not scanned; add them as manual rules.
 

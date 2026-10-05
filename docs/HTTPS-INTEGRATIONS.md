@@ -31,7 +31,7 @@ to interceptable TCP. IPv6 TCP/443 is fail-closed during the test to prevent byp
 ## Strategy registry
 
 Static integration metadata lives in `https/integrations.json`. This is the single
-registry consumed by the HTTPS proxy and exposed by the updater API to Telegram.
+registry consumed by the HTTPS proxy and exposed by the updater API to the web panel.
 
 Each integration declares:
 
@@ -42,19 +42,19 @@ Each integration declares:
 - renderer metadata for generic actions (`certificate`, `start`, `stop`, `summary`, `clear`).
 
 App-specific behavior lives under `https/app/strategies/`. Networking, CA handling,
-firewall behavior and Telegram UI do not need to be rewritten when another app is added.
+firewall behavior and the web panel do not need to be rewritten when another app is added.
 
-## Telegram workflow
+## Web panel workflow
 
-Use `/integrations`.
+Open the **HTTPS** page.
 
-The menu shows all registered integrations and renders their buttons directly from the
+The page shows all registered integrations and renders their buttons directly from the
 registry. A single persistent private CA is shared by the framework; the CA button in
 each integration returns the same public certificate for convenience.
 
 Initial workflow:
 
-The registry is currently empty. Once an integration is registered, its menu provides
+The registry is currently empty. Once an integration is registered, its card provides
 CA download, start/stop, minimized TLS/HTTP results and integration-scoped clearing.
 
 ## Runtime data
@@ -74,7 +74,7 @@ data/https/
 ```
 
 Only `data/https/public/adblock-general-purpose-ca.cer` is returned by the authenticated updater
-API for Telegram download. The private CA key is never returned.
+API for download from the web panel. The private CA key is never returned.
 
 The same public certificate can be installed on iOS or Android, but it is never required
 for WireGuard or DNS filtering. Applications may reject user-installed CAs or use
@@ -98,7 +98,7 @@ windows short and stop the integration after each test.
 
 Create an `AppStrategy` subclass under `https/app/strategies/`, register its import path,
 host suffixes and action metadata in `https/integrations.json`, then add host/behavior
-tests. No WireGuard, firewall, CA, Compose, updater or Telegram change is required.
+tests. No WireGuard, firewall, CA, Compose, updater or web panel change is required.
 
 ## Reading an observation result
 

@@ -31,7 +31,7 @@ Raspberry Pi / Docker
   |      +--> shared SQLite statistics volume
   |
   +--> updater
-  +--> telegram-bot
+  +--> web panel (LAN :8088)
 ```
 
 ## Network boundary
@@ -43,7 +43,7 @@ It has:
 - `vpn-egress`: outbound Internet access;
 - `vpn-dns`: an internal-only network shared only with `doh-a` and `doh-b`.
 
-This prevents a VPN client from receiving a route to updater, Telegram or the resolver admin HTTP API. DNS is exposed to the peer only through `10.66.66.1:53` inside the WireGuard interface.
+This prevents a VPN client from receiving a route to updater, the web panel or the resolver admin HTTP API. DNS is exposed to the peer only through `10.66.66.1:53` inside the WireGuard interface.
 
 No host DNS port is published.
 

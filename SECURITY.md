@@ -5,7 +5,7 @@ sensitive deployment information. Contact the repository owner privately through
 security advisory feature on GitHub.
 
 Never attach `.env`, WireGuard configurations, QR codes, private keys, preshared keys,
-Telegram tokens, GitHub tokens, CA private material or unsanitized runtime logs.
+web panel passwords, GitHub tokens, CA private material or unsanitized runtime logs.
 
 Only the latest `master` revision is supported during initial development. Reports should
 include the commit SHA, affected component, reproduction steps and sanitized diagnostics.
