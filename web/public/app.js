@@ -151,7 +151,7 @@ async function overviewPage() {
     ["DNS resolver B", services.dohB],
     ["WireGuard", services.wireguard],
     ["Web panel", services.web],
-    ["HTTPS proxy", services.httpsProxy ?? "stopped"],
+    ["HTTPS lab (optional)", services.httpsProxy ?? "stopped"],
   ].map(([name, state]) => row({ title: name, right: h("span", { class: `chip ${stateClass(state)}` }, state ?? "unknown") }));
 
   const topList = (title, data) => card(
