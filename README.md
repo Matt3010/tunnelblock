@@ -14,7 +14,7 @@ no public DNS or administration endpoint is exposed.
 | Multiple VPN peers | ✅ | ✅ |
 | Web panel administration (LAN/VPN only) | ✅ | ✅ |
 | Per-user LAN access with network discovery | ✅ | ✅ |
-| Automatic updates with rollback | ✅ | ✅ |
+| One-click updates with rollback | ✅ | ✅ |
 | Rolling DNS resolver updates | ✅ | ✅ |
 | HTTPS inspection | Experimental | Experimental |
 
@@ -81,7 +81,7 @@ data/wireguard/
 
 SQLite and updater state use named Docker volumes.
 
-WireGuard server/client private keys, the preshared key, generated client configuration and QR image are created at runtime under `data/wireguard/`. Existing files are reused, so `docker compose up -d --force-recreate` and automatic updates do not rotate keys.
+WireGuard server/client private keys, the preshared key, generated client configuration and QR image are created at runtime under `data/wireguard/`. Existing files are reused, so `docker compose up -d --force-recreate` and updates do not rotate keys.
 
 Never use `docker compose down -v` as part of normal deployment or recovery.
 
@@ -117,7 +117,7 @@ See [docs/WIREGUARD.md](docs/WIREGUARD.md) for router setup and VPN verification
 
 ## Deployment
 
-The updater watches `master`. A deployment runs the current `ops/deploy.sh`, which:
+Updates are manual: **Update now** in the web panel deploys the latest `master`. A deployment runs the current `ops/deploy.sh`, which:
 
 1. validates the Compose configuration;
 2. builds the complete stack;

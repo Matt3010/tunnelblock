@@ -163,7 +163,6 @@ services:
       GIT_BRANCH: ${UPDATE_BRANCH:-master}
       REPO_DIR: /workspace
       COMPOSE_PROJECT_NAME: adblock-general-purpose
-      AUTO_UPDATE_INTERVAL_SEC: 300
       LIST_REFRESH_INTERVAL_HOURS: 24
       LAN_SCAN_INTERVAL_HOURS: 12
       UPDATER_STATE_FILE: /updater-data/state.json

@@ -202,7 +202,6 @@ function updateCard(update, error) {
       h("dt", {}, "Version"), h("dd", {}, h("code", {}, String(update.currentSha ?? "-").slice(0, 8))),
       h("dt", {}, "Last started"), h("dd", {}, date(update.lastStartedAt)),
       h("dt", {}, "Last finished"), h("dd", {}, date(update.lastFinishedAt)),
-      update.lastAutomaticCheckError ? [h("dt", {}, "Auto-check"), h("dd", { class: "warn" }, update.lastAutomaticCheckError)] : null,
     ),
     state === "failed" ? h("p", { class: "bad" }, "The last update failed and was rolled back. See the log below.") : null,
     h("div", { class: "actions" },

@@ -1,18 +1,12 @@
 # System-agnostic updater
 
-The updater container checks the private GitHub repository for changes to `master`.
-
-Default polling interval:
-
-```text
-300 seconds (5 minutes)
-```
-
-The web panel **Overview** page starts a manual update and shows its progress and log.
+Updates are manual only: pushing to `master` deploys nothing. Press **Update now** on
+the web panel **Overview** page to deploy the latest `master`; the same page shows
+progress and the deployment log.
 
 ## Current deployment flow
 
-For a detected target SHA:
+When an update is requested:
 
 1. `updater/bootstrap-update.sh` fetches `origin/master`;
 2. it records the previous SHA;

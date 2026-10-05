@@ -4,7 +4,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { X509Certificate } from "node:crypto";
 import Fastify from "fastify";
-import { runtimeNeedsDeployment } from "./revision.js";
 import { loadHttpsRegistry, summarizeHttpsObservation, validIntegrationAction, type HttpsIntegration } from "./https-integrations.js";
 import { parseDiscoveryOutput, validLanRule, type LanInventory } from "./lan-discovery.js";
 
@@ -18,7 +17,6 @@ const branch = process.env.GIT_BRANCH ?? "master";
 const composeProjectName = process.env.COMPOSE_PROJECT_NAME ?? "adblock-general-purpose";
 const updaterDataVolume =
   process.env.UPDATER_DATA_VOLUME ?? "adblock-general-purpose-updater-data";
-const pollIntervalSec = Number(process.env.AUTO_UPDATE_INTERVAL_SEC ?? 300);
 const listRefreshIntervalHours = Number(process.env.LIST_REFRESH_INTERVAL_HOURS ?? 24);
 const lanScanIntervalHours = Number(process.env.LAN_SCAN_INTERVAL_HOURS ?? 12);
 const runtimeGeneration = process.env.UPDATER_RUNTIME_GENERATION ?? "unknown";
@@ -40,8 +38,6 @@ type UpdateState = {
 };
 
 let launching = false;
-let lastAutomaticCheckAt: string | null = null;
-let lastAutomaticCheckError: string | null = null;
 
 function safeProcessError(error: unknown): {
   code: string | number | null;
@@ -133,43 +129,6 @@ function authorized(request: any, reply: any): boolean {
   }
 
   return true;
-}
-
-function githubAuthHeader(): string {
-  if (!githubToken) throw new Error("GITHUB_TOKEN is not configured");
-  return Buffer.from(`x-access-token:${githubToken}`).toString("base64");
-}
-
-async function fetchRemoteSha(): Promise<string> {
-  const auth = githubAuthHeader();
-  const { stdout } = await execFileAsync(
-    "git",
-    [
-      "-c",
-      `safe.directory=${repoDir}`,
-      "-c",
-      "credential.helper=",
-      "ls-remote",
-      "origin",
-      `refs/heads/${branch}`,
-    ],
-    {
-      cwd: repoDir,
-      env: {
-        ...process.env,
-        GIT_CONFIG_COUNT: "1",
-        GIT_CONFIG_KEY_0: "http.extraHeader",
-        GIT_CONFIG_VALUE_0: `Authorization: Basic ${auth}`,
-      },
-    },
-  );
-
-  const sha = stdout.trim().split(/\s+/)[0];
-  if (!/^[a-f0-9]{40}$/i.test(sha ?? "")) {
-    throw new Error("Unable to resolve remote branch SHA");
-  }
-
-  return sha;
 }
 
 async function localSha(): Promise<string> {
@@ -623,52 +582,6 @@ async function launchDeployment(): Promise<{ started: boolean; helperId?: string
   }
 }
 
-async function checkForUpdates(): Promise<void> {
-  if (launching) return;
-
-  await reconcileInterruptedDeployment();
-  const state = loadUpdateState();
-  if (state.running) return;
-
-  try {
-    lastAutomaticCheckAt = new Date().toISOString();
-    const remote = await fetchRemoteSha();
-    const local = await localSha();
-    lastAutomaticCheckError = null;
-
-    if (remote === state.failedRemoteSha) {
-      app.log.warn({ remote }, "skipping-previously-failed-revision");
-      return;
-    }
-
-    if (remote !== local) {
-      app.log.info({ local, remote }, "new-master-revision-detected");
-      await launchDeployment();
-      return;
-    }
-
-    if (runtimeNeedsDeployment(remote, runtimeBuildSha)) {
-      app.log.info(
-        { remote, runtimeBuildSha },
-        "stale-runtime-revision-detected",
-      );
-      await launchDeployment();
-      return;
-    }
-
-    if (state.lastSeenRemoteSha !== remote) {
-      persistUpdateState({
-        ...state,
-        lastSeenRemoteSha: remote,
-      });
-    }
-  } catch (error) {
-    const safeError = safeProcessError(error);
-    lastAutomaticCheckError = safeError.stderr || `git check failed (${safeError.code ?? "unknown"})`;
-    app.log.error(safeError, "automatic-update-check-failed");
-  }
-}
-
 app.get("/health", async () => ({
   ok: true,
   runtimeGeneration,
@@ -697,11 +610,7 @@ app.get("/status", async (request, reply) => {
 
   return {
     ...state,
-    autoUpdate: true,
     githubAuthConfigured: Boolean(githubToken),
-    pollIntervalSec,
-    lastAutomaticCheckAt,
-    lastAutomaticCheckError,
     statePersistent: true,
     runtimeGeneration,
     runtimeBuildSha,
@@ -945,11 +854,9 @@ await app.listen({
 });
 
 setTimeout(() => void reconcileInterruptedDeployment(), 15_000);
-setTimeout(() => void checkForUpdates(), 20_000);
 setTimeout(() => void refreshExternalBlocklists(), 60_000);
 setTimeout(() => { if (!loadLanInventory()) startLanScan(); }, 90_000);
 
-setInterval(() => void checkForUpdates(), pollIntervalSec * 1000);
 setInterval(
   () => void refreshExternalBlocklists(),
   listRefreshIntervalHours * 60 * 60 * 1000,

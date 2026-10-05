@@ -7,7 +7,7 @@
 - [x] Docker deployment
 - [x] Persistent SQLite statistics
 - [x] Telegram administration (replaced by the LAN-only web panel)
-- [x] Automatic updater with rollback
+- [x] Updater with rollback (manual, from the web panel)
 
 ## M1 - Public DoH (retired)
 
